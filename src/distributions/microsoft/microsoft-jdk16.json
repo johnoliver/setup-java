@@ -1,0 +1,86 @@
+[
+  {
+    "binaries": [
+      {
+        "architecture": "x64",
+        "image_type": "jdk",
+        "jvm_impl": "hotspot",
+        "os": "mac",
+        "package": {
+          "link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-macos-x64.tar.gz",
+          "name": "microsoft-jdk-16.0.2.7.1-macos-x64.tar.gz",
+          "sha256sum_link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-macos-x64.tar.gz.sha256sum.txt",
+          "sha256sum": "902ce95b3175ebe7bce52f8a2b6c1e291c6f688bd6da225e079e2ee84b98f7d2"
+        },
+        "scm_ref": "",
+        "heap_size": "normal"
+      },
+      {
+        "architecture": "x64",
+        "image_type": "jdk",
+        "jvm_impl": "hotspot",
+        "os": "linux",
+        "package": {
+          "link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-linux-x64.tar.gz",
+          "name": "microsoft-jdk-16.0.2.7.1-linux-x64.tar.gz",
+          "sha256sum_link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-linux-x64.tar.gz.sha256sum.txt",
+          "sha256sum": "30924e429fa7b138b3ce4d15c07a2c0284752363e4ceb56a479d244472a0ceb8"
+        },
+        "scm_ref": "",
+        "heap_size": "normal"
+      },
+      {
+        "architecture": "x64",
+        "image_type": "jdk",
+        "jvm_impl": "hotspot",
+        "os": "windows",
+        "package": {
+          "link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-windows-x64.zip",
+          "name": "microsoft-jdk-16.0.2.7.1-windows-x64.zip",
+          "sha256sum_link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-windows-x64.zip.sha256sum.txt",
+          "sha256sum": "2911ef05fc64fd9f6a992807416f3806f1862a545fe2fd72b87fcdd1ad9371ca"
+        },
+        "scm_ref": "",
+        "heap_size": "normal"
+      },
+      {
+        "architecture": "aarch64",
+        "image_type": "jdk",
+        "jvm_impl": "hotspot",
+        "os": "mac",
+        "package": {
+          "link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-macos-aarch64.tar.gz",
+          "name": "microsoft-jdk-16.0.2.7.1-macos-aarch64.tar.gz",
+          "sha256sum_link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-macos-aarch64.tar.gz.sha256sum.txt",
+          "sha256sum": "b3f48e247f9ae7286c7b5bfd6f3ac45966a0c28373915be560dcebda35a3d03f"
+        },
+        "scm_ref": "",
+        "heap_size": "normal"
+      },
+      {
+        "architecture": "aarch64",
+        "image_type": "jdk",
+        "jvm_impl": "hotspot",
+        "os": "linux",
+        "package": {
+          "link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-linux-aarch64.tar.gz",
+          "name": "microsoft-jdk-16.0.2.7.1-linux-aarch64.tar.gz",
+          "sha256sum_link": "https://aka.ms/download-jdk/microsoft-jdk-16.0.2.7.1-linux-aarch64.tar.gz.sha256sum.txt",
+          "sha256sum": "d5636f05a9664bcc04ebffaa694548a74d95ce3ff6e4c56930d15de76ae1ed23"
+        },
+        "scm_ref": "",
+        "heap_size": "normal"
+      }
+    ],
+    "openjdk_version_data": {
+      "build": 7,
+      "major": 16,
+      "minor": 0,
+      "openjdk_version": "16.0.2+7",
+      "security": 2
+    },
+    "release_link": "https://aka.ms/download-jdk",
+    "release_name": "16.0.2+7.1",
+    "vendor": "microsoft"
+  }
+]
