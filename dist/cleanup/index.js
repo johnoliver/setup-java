@@ -52434,10 +52434,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.renameWinArchive = exports.validatePaginationUrl = exports.getNextPageUrlFromLinkHeader = exports.MAX_PAGINATION_PAGES = exports.getGitHubHttpHeaders = exports.convertVersionToSemver = exports.getVersionFromFileContent = exports.isCacheFeatureAvailable = exports.isGhes = exports.isJobStatusSuccess = exports.getToolcachePath = exports.isVersionSatisfies = exports.getDownloadArchiveExtension = exports.extractJdkFile = exports.getVersionFromToolcachePath = exports.getBooleanInput = exports.getTempDir = void 0;
+exports.verifyFileChecksum = exports.renameWinArchive = exports.validatePaginationUrl = exports.getNextPageUrlFromLinkHeader = exports.MAX_PAGINATION_PAGES = exports.getGitHubHttpHeaders = exports.convertVersionToSemver = exports.getVersionFromFileContent = exports.isCacheFeatureAvailable = exports.isGhes = exports.isJobStatusSuccess = exports.getToolcachePath = exports.isVersionSatisfies = exports.getDownloadArchiveExtension = exports.extractJdkFile = exports.getVersionFromToolcachePath = exports.getBooleanInput = exports.getTempDir = void 0;
 const os_1 = __importDefault(__nccwpck_require__(70857));
 const path_1 = __importDefault(__nccwpck_require__(16928));
 const fs = __importStar(__nccwpck_require__(79896));
+const crypto = __importStar(__nccwpck_require__(76982));
 const semver = __importStar(__nccwpck_require__(62088));
 const cache = __importStar(__nccwpck_require__(5116));
 const core = __importStar(__nccwpck_require__(37484));
@@ -52660,6 +52661,25 @@ function renameWinArchive(javaArchivePath) {
     return javaArchivePathRenamed;
 }
 exports.renameWinArchive = renameWinArchive;
+function verifyFileChecksum(filePath, expectedChecksum) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const actualChecksum = yield new Promise((resolve, reject) => {
+            const hash = crypto.createHash('sha256');
+            const stream = fs.createReadStream(filePath);
+            stream.on('data', chunk => hash.update(chunk));
+            stream.on('end', () => resolve(hash.digest('hex').toLowerCase()));
+            stream.on('error', error => {
+                stream.destroy();
+                reject(error);
+            });
+        });
+        const normalizedExpectedChecksum = expectedChecksum.toLowerCase();
+        if (actualChecksum !== normalizedExpectedChecksum) {
+            throw new Error(`Checksum mismatch for downloaded Java archive: expected '${normalizedExpectedChecksum}' but got '${actualChecksum}'`);
+        }
+    });
+}
+exports.verifyFileChecksum = verifyFileChecksum;
 
 
 /***/ }),

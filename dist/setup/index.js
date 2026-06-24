@@ -80693,7 +80693,8 @@ class TemurinDistribution extends base_installer_1.JavaBase {
                 return {
                     version: formattedVersion,
                     url: item.binaries[0].package.link,
-                    signatureUrl: item.binaries[0].package.signature_link
+                    signatureUrl: item.binaries[0].package.signature_link,
+                    checksum: item.binaries[0].package.checksum
                 };
             });
             const satisfiedVersions = availableVersionsWithBinaries
@@ -80714,6 +80715,21 @@ class TemurinDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            try {
+                core.info('Verifying Java package checksum...');
+                if (javaRelease.checksum) {
+                    yield (0, util_1.verifyFileChecksum)(javaArchivePath, javaRelease.checksum);
+                }
+                else {
+                    core.warning('No checksum available for this Temurin release; skipping integrity check.');
+                }
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const checksumError = new Error(`Failed to verify checksum for Temurin version ${javaRelease.version}: ${message}`);
+                checksumError.cause = error;
+                throw checksumError;
+            }
             if (this.verifySignature) {
                 if (!javaRelease.signatureUrl) {
                     throw new Error(`Input 'verify-signature' is enabled, but no signature URL was found for Temurin version ${javaRelease.version}.`);
@@ -81463,10 +81479,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.renameWinArchive = exports.validatePaginationUrl = exports.getNextPageUrlFromLinkHeader = exports.MAX_PAGINATION_PAGES = exports.getGitHubHttpHeaders = exports.convertVersionToSemver = exports.getVersionFromFileContent = exports.isCacheFeatureAvailable = exports.isGhes = exports.isJobStatusSuccess = exports.getToolcachePath = exports.isVersionSatisfies = exports.getDownloadArchiveExtension = exports.extractJdkFile = exports.getVersionFromToolcachePath = exports.getBooleanInput = exports.getTempDir = void 0;
+exports.verifyFileChecksum = exports.renameWinArchive = exports.validatePaginationUrl = exports.getNextPageUrlFromLinkHeader = exports.MAX_PAGINATION_PAGES = exports.getGitHubHttpHeaders = exports.convertVersionToSemver = exports.getVersionFromFileContent = exports.isCacheFeatureAvailable = exports.isGhes = exports.isJobStatusSuccess = exports.getToolcachePath = exports.isVersionSatisfies = exports.getDownloadArchiveExtension = exports.extractJdkFile = exports.getVersionFromToolcachePath = exports.getBooleanInput = exports.getTempDir = void 0;
 const os_1 = __importDefault(__nccwpck_require__(70857));
 const path_1 = __importDefault(__nccwpck_require__(16928));
 const fs = __importStar(__nccwpck_require__(79896));
+const crypto = __importStar(__nccwpck_require__(76982));
 const semver = __importStar(__nccwpck_require__(62088));
 const cache = __importStar(__nccwpck_require__(5116));
 const core = __importStar(__nccwpck_require__(37484));
@@ -81689,6 +81706,25 @@ function renameWinArchive(javaArchivePath) {
     return javaArchivePathRenamed;
 }
 exports.renameWinArchive = renameWinArchive;
+function verifyFileChecksum(filePath, expectedChecksum) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const actualChecksum = yield new Promise((resolve, reject) => {
+            const hash = crypto.createHash('sha256');
+            const stream = fs.createReadStream(filePath);
+            stream.on('data', chunk => hash.update(chunk));
+            stream.on('end', () => resolve(hash.digest('hex').toLowerCase()));
+            stream.on('error', error => {
+                stream.destroy();
+                reject(error);
+            });
+        });
+        const normalizedExpectedChecksum = expectedChecksum.toLowerCase();
+        if (actualChecksum !== normalizedExpectedChecksum) {
+            throw new Error(`Checksum mismatch for downloaded Java archive: expected '${normalizedExpectedChecksum}' but got '${actualChecksum}'`);
+        }
+    });
+}
+exports.verifyFileChecksum = verifyFileChecksum;
 
 
 /***/ }),
