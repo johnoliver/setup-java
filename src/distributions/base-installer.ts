@@ -4,7 +4,11 @@ import * as fs from 'fs';
 import semver from 'semver';
 import path from 'path';
 import * as httpm from '@actions/http-client';
-import {getToolcachePath, isVersionSatisfies} from '../util';
+import {
+  getToolcachePath,
+  isVersionSatisfies,
+  verifyFileChecksum
+} from '../util';
 import {
   JavaDownloadRelease,
   JavaInstallerOptions,
@@ -191,6 +195,29 @@ export abstract class JavaBase {
 
   protected supportsSignatureVerification(): boolean {
     return false;
+  }
+
+  protected async verifyDownloadedArchiveChecksum(
+    javaArchivePath: string,
+    javaRelease: JavaDownloadRelease
+  ): Promise<void> {
+    try {
+      core.info('Verifying Java package checksum...');
+      if (javaRelease.checksum) {
+        await verifyFileChecksum(javaArchivePath, javaRelease.checksum);
+      } else {
+        core.warning(
+          `No checksum available for this ${this.distribution} release; skipping integrity check.`
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const checksumError = new Error(
+        `Failed to verify checksum for ${this.distribution} version ${javaRelease.version}: ${message}`
+      ) as Error & {cause?: unknown};
+      checksumError.cause = error;
+      throw checksumError;
+    }
   }
 
   protected getToolcacheVersionName(version: string): string {

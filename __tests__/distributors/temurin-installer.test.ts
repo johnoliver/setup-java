@@ -363,7 +363,7 @@ describe('downloadTool', () => {
     });
 
     expect(spyCoreWarning).toHaveBeenCalledWith(
-      'No checksum available for this Temurin release; skipping integrity check.'
+      'No checksum available for this Temurin-Hotspot release; skipping integrity check.'
     );
   });
 

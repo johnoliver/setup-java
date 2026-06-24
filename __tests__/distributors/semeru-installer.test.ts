@@ -211,6 +211,20 @@ describe('findPackageForDownload', () => {
     );
   });
 
+  it('includes checksum from the Semeru API response', async () => {
+    const distribution = new SemeruDistribution({
+      version: '11',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    distribution['getAvailableVersions'] = async () => manifestData as any;
+
+    const resolvedVersion = await distribution['findPackageForDownload']('11');
+
+    expect(resolvedVersion.checksum).toBeTruthy();
+  });
+
   it.each(['x64', 'x86', 'ppc64le', 'ppc64', 's390x', 'aarch64'])(
     'correct Semeru `%s` architecture resolves',
     async (arch: string) => {

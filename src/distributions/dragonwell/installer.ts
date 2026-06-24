@@ -46,7 +46,8 @@ export class DragonwellDistribution extends JavaBase {
       .map(item => {
         return {
           version: item.jdk_version,
-          url: item.download_link
+          url: item.download_link,
+          checksum: item.checksum
         } as JavaDownloadRelease;
       });
 
@@ -103,6 +104,7 @@ export class DragonwellDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();

@@ -242,6 +242,20 @@ describe('getAvailableVersions', () => {
       }
     );
 
+    it('includes checksum from the SapMachine release data', async () => {
+      const distribution = new SapMachineDistribution({
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      });
+      mockPlatform(distribution, 'linux');
+
+      const availableVersion = await distribution['findPackageForDownload']('17');
+
+      expect(availableVersion.checksum).toBeTruthy();
+    });
+
     it.each([
       ['8', 'linux', 'x64'],
       ['8', 'macos', 'aarch64'],

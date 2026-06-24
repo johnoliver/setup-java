@@ -161,6 +161,22 @@ describe('getAvailableVersions', () => {
       expect(availableVersion.url).toBe(expectedLink);
     });
 
+    it('includes checksum from the Corretto release data', async () => {
+      const version = '18';
+      const distribution = new CorrettoDistribution({
+        version,
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      });
+      mockPlatform(distribution, 'linux');
+
+      const availableVersion =
+        await distribution['findPackageForDownload'](version);
+
+      expect(availableVersion.checksum).toBeTruthy();
+    });
+
     it('with unstable version expect to throw not supported error', async () => {
       const version = '18.0.1-ea';
       const distribution = new CorrettoDistribution({

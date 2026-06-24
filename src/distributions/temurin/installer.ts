@@ -21,8 +21,7 @@ import {
   isVersionSatisfies,
   renameWinArchive,
   MAX_PAGINATION_PAGES,
-  validatePaginationUrl,
-  verifyFileChecksum
+  validatePaginationUrl
 } from '../../util';
 
 export {ADOPTIUM_PUBLIC_KEY} from './adoptium-key';
@@ -86,24 +85,7 @@ export class TemurinDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
-
-    try {
-      core.info('Verifying Java package checksum...');
-      if (javaRelease.checksum) {
-        await verifyFileChecksum(javaArchivePath, javaRelease.checksum);
-      } else {
-        core.warning(
-          'No checksum available for this Temurin release; skipping integrity check.'
-        );
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const checksumError = new Error(
-        `Failed to verify checksum for Temurin version ${javaRelease.version}: ${message}`
-      ) as Error & {cause?: unknown};
-      checksumError.cause = error;
-      throw checksumError;
-    }
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     if (this.verifySignature) {
       if (!javaRelease.signatureUrl) {

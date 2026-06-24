@@ -219,6 +219,20 @@ describe('getAvailableVersions', () => {
       }
     );
 
+    it('includes checksum from the Dragonwell release data', async () => {
+      const distribution = new DragonwellDistribution({
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      });
+      mockPlatform(distribution, 'linux');
+
+      const availableVersion = await distribution['findPackageForDownload']('17');
+
+      expect(availableVersion.checksum).toBeTruthy();
+    });
+
     it.each([
       ['8', 'alpine-linux', 'x64'],
       ['8', 'macos', 'aarch64'],

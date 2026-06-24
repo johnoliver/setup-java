@@ -31,6 +31,7 @@ export class OracleDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();
@@ -102,7 +103,11 @@ export class OracleDistribution extends JavaBase {
       const response = await this.http.head(url);
 
       if (response.message.statusCode === HttpCodes.OK) {
-        return {url, version: range};
+        return {
+          url,
+          version: range,
+          checksum: await this.getChecksum(url)
+        };
       }
 
       if (response.message.statusCode !== HttpCodes.NotFound) {
@@ -127,6 +132,23 @@ export class OracleDistribution extends JavaBase {
         throw new Error(
           `Platform '${platform}' is not supported. Supported platforms: 'linux', 'macos', 'windows'`
         );
+    }
+  }
+
+  private async getChecksum(url: string): Promise<string | undefined> {
+    const checksumUrl = `${url}.sha256`;
+
+    try {
+      const checksumPath = await tc.downloadTool(checksumUrl);
+      const checksumContents = fs.readFileSync(checksumPath, 'utf8').trim();
+      const checksum = checksumContents.split(/\s+/)[0];
+      return checksum || undefined;
+    } catch (error) {
+      core.warning(
+        `Unable to download Oracle checksum from ${checksumUrl}; skipping integrity check.`
+      );
+      core.debug((error as Error).message);
+      return undefined;
     }
   }
 }
