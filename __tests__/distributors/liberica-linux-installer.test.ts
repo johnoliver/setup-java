@@ -89,7 +89,7 @@ describe('getAvailableVersions', () => {
     ]
   ])('build correct url for %s -> %s', async (input, urlParams) => {
     const additionalParams =
-      '&installation-type=archive&fields=downloadUrl%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
+      '&installation-type=archive&fields=downloadUrl%2Csha256%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
       'updateVersion%2CbuildVersion';
     const distribution = new LibericaDistributions(input);
     distribution['getPlatformOption'] = () => 'linux';
@@ -123,7 +123,7 @@ describe('getAvailableVersions', () => {
       });
 
       const additionalParams =
-        '&installation-type=archive&fields=downloadUrl%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
+        '&installation-type=archive&fields=downloadUrl%2Csha256%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
         'updateVersion%2CbuildVersion';
       distribution['getPlatformOption'] = () => 'linux';
 

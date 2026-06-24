@@ -78138,7 +78138,8 @@ class AdoptDistribution extends base_installer_1.JavaBase {
                 .map(item => {
                 return {
                     version: item.version_data.semver,
-                    url: item.binaries[0].package.link
+                    url: item.binaries[0].package.link,
+                    checksum: item.binaries[0].package.checksum
                 };
             });
             const satisfiedVersions = availableVersionsWithBinaries
@@ -78158,6 +78159,7 @@ class AdoptDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -78451,6 +78453,25 @@ class JavaBase {
     supportsSignatureVerification() {
         return false;
     }
+    verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease) {
+        return __awaiter(this, void 0, void 0, function* () {
+            try {
+                core.info('Verifying Java package checksum...');
+                if (javaRelease.checksum) {
+                    yield (0, util_1.verifyFileChecksum)(javaArchivePath, javaRelease.checksum);
+                }
+                else {
+                    core.warning(`No checksum available for this ${this.distribution} release; skipping integrity check.`);
+                }
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                const checksumError = new Error(`Failed to verify checksum for ${this.distribution} version ${javaRelease.version}: ${message}`);
+                checksumError.cause = error;
+                throw checksumError;
+            }
+        });
+    }
     getToolcacheVersionName(version) {
         if (!this.stable) {
             if (version.includes('+')) {
@@ -78630,6 +78651,7 @@ class CorrettoDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -78657,7 +78679,8 @@ class CorrettoDistribution extends base_installer_1.JavaBase {
                 .map(item => {
                 return {
                     version: (0, util_1.convertVersionToSemver)(item.correttoVersion),
-                    url: item.downloadLink
+                    url: item.downloadLink,
+                    checksum: item.checksum_sha256
                 };
             });
             const resolvedVersion = matchingVersions.length > 0 ? matchingVersions[0] : null;
@@ -78896,7 +78919,8 @@ class DragonwellDistribution extends base_installer_1.JavaBase {
                 .map(item => {
                 return {
                     version: item.jdk_version,
-                    url: item.download_link
+                    url: item.download_link,
+                    checksum: item.checksum
                 };
             });
             if (!matchedVersions.length) {
@@ -78932,6 +78956,7 @@ class DragonwellDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -79658,6 +79683,7 @@ class LibericaDistributions extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -79675,7 +79701,8 @@ class LibericaDistributions extends base_installer_1.JavaBase {
             const availableVersionsRaw = yield this.getAvailableVersions();
             const availableVersions = availableVersionsRaw.map(item => ({
                 url: item.downloadUrl,
-                version: this.convertVersionToSemver(item)
+                version: this.convertVersionToSemver(item),
+                checksum: item.sha256
             }));
             const satisfiedVersion = availableVersions
                 .filter(item => (0, util_1.isVersionSatisfies)(range, item.version))
@@ -79707,7 +79734,7 @@ class LibericaDistributions extends base_installer_1.JavaBase {
         });
     }
     prepareAvailableVersionsUrl() {
-        const urlOptions = Object.assign(Object.assign({ os: this.getPlatformOption(), 'bundle-type': this.getBundleType() }, this.getArchitectureOptions()), { 'build-type': this.stable ? 'all' : 'ea', 'installation-type': 'archive', fields: 'downloadUrl,version,featureVersion,interimVersion,updateVersion,buildVersion' });
+        const urlOptions = Object.assign(Object.assign({ os: this.getPlatformOption(), 'bundle-type': this.getBundleType() }, this.getArchitectureOptions()), { 'build-type': this.stable ? 'all' : 'ea', 'installation-type': 'archive', fields: 'downloadUrl,sha256,version,featureVersion,interimVersion,updateVersion,buildVersion' });
         const searchParams = new URLSearchParams(urlOptions).toString();
         return `https://api.bell-sw.com/v1/liberica/releases?${searchParams}`;
     }
@@ -80079,6 +80106,7 @@ class OracleDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -80126,7 +80154,11 @@ class OracleDistribution extends base_installer_1.JavaBase {
             for (const url of possibleUrls) {
                 const response = yield this.http.head(url);
                 if (response.message.statusCode === http_client_1.HttpCodes.OK) {
-                    return { url, version: range };
+                    return {
+                        url,
+                        version: range,
+                        checksum: yield this.getChecksum(url)
+                    };
                 }
                 if (response.message.statusCode !== http_client_1.HttpCodes.NotFound) {
                     throw new Error(`Http request for Oracle JDK failed with status code: ${response.message.statusCode}`);
@@ -80146,6 +80178,22 @@ class OracleDistribution extends base_installer_1.JavaBase {
             default:
                 throw new Error(`Platform '${platform}' is not supported. Supported platforms: 'linux', 'macos', 'windows'`);
         }
+    }
+    getChecksum(url) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const checksumUrl = `${url}.sha256`;
+            try {
+                const checksumPath = yield tc.downloadTool(checksumUrl);
+                const checksumContents = fs_1.default.readFileSync(checksumPath, 'utf8').trim();
+                const checksum = checksumContents.split(/\s+/)[0];
+                return checksum || undefined;
+            }
+            catch (error) {
+                core.warning(`Unable to download Oracle checksum from ${checksumUrl}; skipping integrity check.`);
+                core.debug(error.message);
+                return undefined;
+            }
+        });
     }
 }
 exports.OracleDistribution = OracleDistribution;
@@ -80220,7 +80268,8 @@ class SapMachineDistribution extends base_installer_1.JavaBase {
                 .map(item => {
                 return {
                     version: item.version,
-                    url: item.downloadLink
+                    url: item.downloadLink,
+                    checksum: item.checksum
                 };
             });
             if (!matchedVersions.length) {
@@ -80256,6 +80305,7 @@ class SapMachineDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -80454,7 +80504,8 @@ class SemeruDistribution extends base_installer_1.JavaBase {
                     : item.version_data.semver.replace('-beta+', '+');
                 return {
                     version: formattedVersion,
-                    url: item.binaries[0].package.link
+                    url: item.binaries[0].package.link,
+                    checksum: item.binaries[0].package.checksum
                 };
             });
             const satisfiedVersions = availableVersionsWithBinaries
@@ -80477,6 +80528,7 @@ class SemeruDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -80715,21 +80767,7 @@ class TemurinDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
-            try {
-                core.info('Verifying Java package checksum...');
-                if (javaRelease.checksum) {
-                    yield (0, util_1.verifyFileChecksum)(javaArchivePath, javaRelease.checksum);
-                }
-                else {
-                    core.warning('No checksum available for this Temurin release; skipping integrity check.');
-                }
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                const checksumError = new Error(`Failed to verify checksum for Temurin version ${javaRelease.version}: ${message}`);
-                checksumError.cause = error;
-                throw checksumError;
-            }
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             if (this.verifySignature) {
                 if (!javaRelease.signatureUrl) {
                     throw new Error(`Input 'verify-signature' is enabled, but no signature URL was found for Temurin version ${javaRelease.version}.`);
@@ -80904,6 +80942,7 @@ class ZuluDistribution extends base_installer_1.JavaBase {
                 return {
                     version: (0, util_1.convertVersionToSemver)(item.jdk_version),
                     url: item.url,
+                    checksum: item.sha256_hash,
                     zuluVersion: (0, util_1.convertVersionToSemver)(item.zulu_version)
                 };
             });
@@ -80918,7 +80957,8 @@ class ZuluDistribution extends base_installer_1.JavaBase {
                 .map(item => {
                 return {
                     version: item.version,
-                    url: item.url
+                    url: item.url,
+                    checksum: item.checksum
                 };
             });
             const resolvedFullVersion = satisfiedVersions.length > 0 ? satisfiedVersions[0] : null;
@@ -80933,6 +80973,7 @@ class ZuluDistribution extends base_installer_1.JavaBase {
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            yield this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {

@@ -12,7 +12,6 @@ describe('findPackageForDownload', () => {
   let spyHttpClient: jest.SpyInstance;
   let spyCoreError: jest.SpyInstance;
   let spyDownloadTool: jest.SpyInstance;
-  let spyReadFileSync: jest.SpyInstance;
 
   beforeEach(() => {
     distribution = new OracleDistribution({
@@ -30,8 +29,7 @@ describe('findPackageForDownload', () => {
     spyCoreError.mockImplementation(() => {});
     spyDownloadTool = jest.spyOn(tc, 'downloadTool');
     spyDownloadTool.mockResolvedValue('/tmp/oracle.sha256');
-    spyReadFileSync = jest.spyOn(fs, 'readFileSync');
-    spyReadFileSync.mockReturnValue(
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(
       'abc123def456  jdk-21_linux-x64_bin.tar.gz'
     );
   });
