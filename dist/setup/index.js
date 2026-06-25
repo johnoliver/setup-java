@@ -49,7 +49,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.FinalizeCacheError = exports.ReserveCacheError = exports.ValidationError = void 0;
+exports.FinalizeCacheError = exports.CacheWriteDeniedError = exports.CACHE_WRITE_DENIED_PREFIX = exports.ReserveCacheError = exports.ValidationError = void 0;
 exports.isFeatureAvailable = isFeatureAvailable;
 exports.restoreCache = restoreCache;
 exports.saveCache = saveCache;
@@ -77,6 +77,26 @@ class ReserveCacheError extends Error {
     }
 }
 exports.ReserveCacheError = ReserveCacheError;
+/**
+ * Stable prefix used by the cache receiver to signal that the token has
+ * no writable scopes (read-only cache policy). Consumers can match on
+ * this prefix to distinguish policy denials from ordinary contention.
+ */
+exports.CACHE_WRITE_DENIED_PREFIX = 'cache write denied:';
+/**
+ * Extends ReserveCacheError for source-compatibility: existing
+ * `instanceof ReserveCacheError` checks and `typedError.name ===
+ * ReserveCacheError.name` paths keep working, while consumers that want to
+ * distinguish a policy denial can check for CacheWriteDeniedError.name.
+ */
+class CacheWriteDeniedError extends ReserveCacheError {
+    constructor(message) {
+        super(message);
+        this.name = 'CacheWriteDeniedError';
+        Object.setPrototypeOf(this, CacheWriteDeniedError.prototype);
+    }
+}
+exports.CacheWriteDeniedError = CacheWriteDeniedError;
 class FinalizeCacheError extends Error {
     constructor(message) {
         super(message);
@@ -387,7 +407,11 @@ function saveCacheV1(paths_1, key_1, options_1) {
                 throw new Error((_d = (_c = reserveCacheResponse === null || reserveCacheResponse === void 0 ? void 0 : reserveCacheResponse.error) === null || _c === void 0 ? void 0 : _c.message) !== null && _d !== void 0 ? _d : `Cache size of ~${Math.round(archiveFileSize / (1024 * 1024))} MB (${archiveFileSize} B) is over the data cap limit, not saving cache.`);
             }
             else {
-                throw new ReserveCacheError(`Unable to reserve cache with key ${key}, another job may be creating this cache. More details: ${(_e = reserveCacheResponse === null || reserveCacheResponse === void 0 ? void 0 : reserveCacheResponse.error) === null || _e === void 0 ? void 0 : _e.message}`);
+                const detailMessage = (_e = reserveCacheResponse === null || reserveCacheResponse === void 0 ? void 0 : reserveCacheResponse.error) === null || _e === void 0 ? void 0 : _e.message;
+                if (detailMessage === null || detailMessage === void 0 ? void 0 : detailMessage.startsWith(exports.CACHE_WRITE_DENIED_PREFIX)) {
+                    throw new CacheWriteDeniedError(`Unable to reserve cache with key ${key}. More details: ${detailMessage}`);
+                }
+                throw new ReserveCacheError(`Unable to reserve cache with key ${key}, another job may be creating this cache. More details: ${detailMessage}`);
             }
             core.debug(`Saving Cache (ID: ${cacheId})`);
             yield cacheHttpClient.saveCache(cacheId, archivePath, '', options);
@@ -396,6 +420,9 @@ function saveCacheV1(paths_1, key_1, options_1) {
             const typedError = error;
             if (typedError.name === ValidationError.name) {
                 throw error;
+            }
+            else if (typedError.name === CacheWriteDeniedError.name) {
+                core.warning(`Failed to save: ${typedError.message}`);
             }
             else if (typedError.name === ReserveCacheError.name) {
                 core.info(`Failed to save: ${typedError.message}`);
@@ -435,6 +462,7 @@ function saveCacheV1(paths_1, key_1, options_1) {
  */
 function saveCacheV2(paths_1, key_1, options_1) {
     return __awaiter(this, arguments, void 0, function* (paths, key, options, enableCrossOsArchive = false) {
+        var _a;
         // Override UploadOptions to force the use of Azure
         // ...options goes first because we want to override the default values
         // set in UploadOptions with these specific figures
@@ -470,7 +498,11 @@ function saveCacheV2(paths_1, key_1, options_1) {
             try {
                 const response = yield twirpClient.CreateCacheEntry(request);
                 if (!response.ok) {
-                    if (response.message) {
+                    // Skip the redundant inner warning when the receiver signalled a
+                    // policy denial: the outer catch arm below will log a single
+                    // customer-facing warning.
+                    if (response.message &&
+                        !response.message.startsWith(exports.CACHE_WRITE_DENIED_PREFIX)) {
                         core.warning(`Cache reservation failed: ${response.message}`);
                     }
                     throw new Error(response.message || 'Response was not ok');
@@ -479,6 +511,10 @@ function saveCacheV2(paths_1, key_1, options_1) {
             }
             catch (error) {
                 core.debug(`Failed to reserve cache: ${error}`);
+                const errorMessage = (_a = error === null || error === void 0 ? void 0 : error.message) !== null && _a !== void 0 ? _a : '';
+                if (errorMessage.startsWith(exports.CACHE_WRITE_DENIED_PREFIX)) {
+                    throw new CacheWriteDeniedError(`Unable to reserve cache with key ${key}. More details: ${errorMessage}`);
+                }
                 throw new ReserveCacheError(`Unable to reserve cache with key ${key}, another job may be creating this cache.`);
             }
             core.debug(`Attempting to upload cache located at: ${archivePath}`);
@@ -502,6 +538,9 @@ function saveCacheV2(paths_1, key_1, options_1) {
             const typedError = error;
             if (typedError.name === ValidationError.name) {
                 throw error;
+            }
+            else if (typedError.name === CacheWriteDeniedError.name) {
+                core.warning(`Failed to save: ${typedError.message}`);
             }
             else if (typedError.name === ReserveCacheError.name) {
                 core.info(`Failed to save: ${typedError.message}`);
@@ -54024,8 +54063,6 @@ function defaultFactory (origin, opts) {
 
 class Agent extends DispatcherBase {
   constructor ({ factory = defaultFactory, maxRedirections = 0, connect, ...options } = {}) {
-    super()
-
     if (typeof factory !== 'function') {
       throw new InvalidArgumentError('factory must be a function.')
     }
@@ -54037,6 +54074,8 @@ class Agent extends DispatcherBase {
     if (!Number.isInteger(maxRedirections) || maxRedirections < 0) {
       throw new InvalidArgumentError('maxRedirections must be a positive number')
     }
+
+    super(options)
 
     if (connect && typeof connect !== 'function') {
       connect = { ...connect }
@@ -54411,6 +54450,9 @@ const EMPTY_BUF = Buffer.alloc(0)
 const FastBuffer = Buffer[Symbol.species]
 const addListener = util.addListener
 const removeAllListeners = util.removeAllListeners
+const kIdleSocketValidation = Symbol('kIdleSocketValidation')
+const kIdleSocketValidationTimeout = Symbol('kIdleSocketValidationTimeout')
+const kSocketUsed = Symbol('kSocketUsed')
 
 let extractBody
 
@@ -54633,27 +54675,69 @@ class Parser {
 
       const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr
 
-      if (ret === constants.ERROR.PAUSED_UPGRADE) {
-        this.onUpgrade(data.slice(offset))
-      } else if (ret === constants.ERROR.PAUSED) {
-        this.paused = true
-        socket.unshift(data.slice(offset))
-      } else if (ret !== constants.ERROR.OK) {
-        const ptr = llhttp.llhttp_get_error_reason(this.ptr)
-        let message = ''
-        /* istanbul ignore else: difficult to make a test case for */
-        if (ptr) {
-          const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
-          message =
-            'Response does not match the HTTP/1.1 protocol (' +
-            Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
-            ')'
+      if (ret !== constants.ERROR.OK) {
+        const body = data.subarray(offset)
+
+        if (ret === constants.ERROR.PAUSED_UPGRADE) {
+          this.onUpgrade(body)
+        } else if (ret === constants.ERROR.PAUSED) {
+          this.paused = true
+          socket.unshift(body)
+        } else {
+          throw this.createError(ret, body)
         }
-        throw new HTTPParserError(message, constants.ERROR[ret], data.slice(offset))
       }
     } catch (err) {
       util.destroy(socket, err)
     }
+  }
+
+  finish () {
+    assert(currentParser === null)
+    assert(this.ptr != null)
+    assert(!this.paused)
+
+    const { llhttp } = this
+
+    let ret
+
+    try {
+      currentParser = this
+      ret = llhttp.llhttp_finish(this.ptr)
+    } finally {
+      currentParser = null
+    }
+
+    if (ret === constants.ERROR.OK) {
+      return null
+    }
+
+    if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+      this.paused = true
+      return null
+    }
+
+    return this.createError(ret, EMPTY_BUF)
+  }
+
+  createError (ret, data) {
+    const { llhttp, contentLength, bytesRead } = this
+
+    if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+      return new ResponseContentLengthMismatchError()
+    }
+
+    const ptr = llhttp.llhttp_get_error_reason(this.ptr)
+    let message = ''
+    if (ptr) {
+      const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0)
+      message =
+        'Response does not match the HTTP/1.1 protocol (' +
+        Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
+        ')'
+    }
+
+    return new HTTPParserError(message, constants.ERROR[ret], data)
   }
 
   destroy () {
@@ -54680,6 +54764,11 @@ class Parser {
 
     /* istanbul ignore next: difficult to make a test case for */
     if (socket.destroyed) {
+      return -1
+    }
+
+    if (client[kRunning] === 0) {
+      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)))
       return -1
     }
 
@@ -54783,6 +54872,11 @@ class Parser {
 
     /* istanbul ignore next: difficult to make a test case for */
     if (socket.destroyed) {
+      return -1
+    }
+
+    if (client[kRunning] === 0) {
+      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)))
       return -1
     }
 
@@ -54959,6 +55053,7 @@ class Parser {
     request.onComplete(headers)
 
     client[kQueue][client[kRunningIdx]++] = null
+    socket[kSocketUsed] = true
 
     if (socket[kWriting]) {
       assert(client[kRunning] === 0)
@@ -55017,6 +55112,9 @@ async function connectH1 (client, socket) {
   socket[kWriting] = false
   socket[kReset] = false
   socket[kBlocking] = false
+  socket[kIdleSocketValidation] = 0
+  socket[kIdleSocketValidationTimeout] = null
+  socket[kSocketUsed] = false
   socket[kParser] = new Parser(client, socket, llhttpInstance)
 
   addListener(socket, 'error', function (err) {
@@ -55027,8 +55125,11 @@ async function connectH1 (client, socket) {
     // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
     // to the user.
     if (err.code === 'ECONNRESET' && parser.statusCode && !parser.shouldKeepAlive) {
-      // We treat all incoming data so for as a valid response.
-      parser.onMessageComplete()
+      const parserErr = parser.finish()
+      if (parserErr) {
+        this[kError] = parserErr
+        this[kClient][kOnError](parserErr)
+      }
       return
     }
 
@@ -55047,8 +55148,10 @@ async function connectH1 (client, socket) {
     const parser = this[kParser]
 
     if (parser.statusCode && !parser.shouldKeepAlive) {
-      // We treat all incoming data so far as a valid response.
-      parser.onMessageComplete()
+      const parserErr = parser.finish()
+      if (parserErr) {
+        util.destroy(this, parserErr)
+      }
       return
     }
 
@@ -55058,10 +55161,11 @@ async function connectH1 (client, socket) {
     const client = this[kClient]
     const parser = this[kParser]
 
+    clearIdleSocketValidation(this)
+
     if (parser) {
       if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-        // We treat all incoming data so far as a valid response.
-        parser.onMessageComplete()
+        this[kError] = parser.finish() || this[kError]
       }
 
       this[kParser].destroy()
@@ -55124,7 +55228,7 @@ async function connectH1 (client, socket) {
       return socket.destroyed
     },
     busy (request) {
-      if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+      if (socket[kWriting] || socket[kReset] || socket[kBlocking] || socket[kIdleSocketValidation] === 1) {
         return true
       }
 
@@ -55162,6 +55266,31 @@ async function connectH1 (client, socket) {
   }
 }
 
+function clearIdleSocketValidation (socket) {
+  if (socket[kIdleSocketValidationTimeout]) {
+    clearTimeout(socket[kIdleSocketValidationTimeout])
+    socket[kIdleSocketValidationTimeout] = null
+  }
+
+  socket[kIdleSocketValidation] = 0
+}
+
+function scheduleIdleSocketValidation (client, socket) {
+  socket[kIdleSocketValidation] = 1
+  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+    socket[kIdleSocketValidationTimeout] = null
+    socket[kIdleSocketValidation] = 2
+
+    if (client[kSocket] === socket && !socket.destroyed) {
+      client[kResume]()
+    }
+  }, 0)
+  socket[kIdleSocketValidationTimeout].unref?.()
+}
+
+/**
+ * @param {import('./client.js')} client
+ */
 function resumeH1 (client) {
   const socket = client[kSocket]
 
@@ -55174,6 +55303,32 @@ function resumeH1 (client) {
     } else if (socket[kNoRef] && socket.ref) {
       socket.ref()
       socket[kNoRef] = false
+    }
+
+    if (client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
+      if (socket[kIdleSocketValidation] === 0) {
+        scheduleIdleSocketValidation(client, socket)
+        socket[kParser].readMore()
+        if (socket.destroyed) {
+          return
+        }
+        return
+      }
+
+      if (socket[kIdleSocketValidation] === 1) {
+        socket[kParser].readMore()
+        if (socket.destroyed) {
+          return
+        }
+        return
+      }
+    }
+
+    if (client[kRunning] === 0) {
+      socket[kParser].readMore()
+      if (socket.destroyed) {
+        return
+      }
     }
 
     if (client[kSize] === 0) {
@@ -55269,6 +55424,7 @@ function writeH1 (client, request) {
   }
 
   const socket = client[kSocket]
+  clearIdleSocketValidation(socket)
 
   const abort = (err) => {
     if (request.aborted || request.completed) {
@@ -56590,9 +56746,10 @@ class Client extends DispatcherBase {
     autoSelectFamilyAttemptTimeout,
     // h2
     maxConcurrentStreams,
-    allowH2
+    allowH2,
+    webSocket
   } = {}) {
-    super()
+    super({ webSocket })
 
     if (keepAlive !== undefined) {
       throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -57125,15 +57282,24 @@ const { kDestroy, kClose, kClosed, kDestroyed, kDispatch, kInterceptors } = __nc
 const kOnDestroyed = Symbol('onDestroyed')
 const kOnClosed = Symbol('onClosed')
 const kInterceptedDispatch = Symbol('Intercepted Dispatch')
+const kWebSocketOptions = Symbol('webSocketOptions')
 
 class DispatcherBase extends Dispatcher {
-  constructor () {
+  constructor (opts) {
     super()
 
     this[kDestroyed] = false
     this[kOnDestroyed] = null
     this[kClosed] = false
     this[kOnClosed] = []
+    this[kWebSocketOptions] = opts?.webSocket ?? {}
+  }
+
+  get webSocketOptions () {
+    return {
+      maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
+      maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024
+    }
   }
 
   get destroyed () {
@@ -57697,8 +57863,8 @@ const kRemoveClient = Symbol('remove client')
 const kStats = Symbol('stats')
 
 class PoolBase extends DispatcherBase {
-  constructor () {
-    super()
+  constructor (opts) {
+    super(opts)
 
     this[kQueue] = new FixedQueue()
     this[kClients] = []
@@ -57958,8 +58124,6 @@ class Pool extends PoolBase {
     allowH2,
     ...options
   } = {}) {
-    super()
-
     if (connections != null && (!Number.isFinite(connections) || connections < 0)) {
       throw new InvalidArgumentError('invalid connections')
     }
@@ -57983,6 +58147,8 @@ class Pool extends PoolBase {
         ...connect
       })
     }
+
+    super(options)
 
     this[kInterceptors] = options.interceptors?.Pool && Array.isArray(options.interceptors.Pool)
       ? options.interceptors.Pool
@@ -63068,32 +63234,25 @@ function parseUnparsedAttributes (unparsedAttributes, cookieAttributeList = {}) 
     // If the attribute-name case-insensitively matches the string
     // "SameSite", the user agent MUST process the cookie-av as follows:
 
-    // 1. Let enforcement be "Default".
-    let enforcement = 'Default'
-
     const attributeValueLowercase = attributeValue.toLowerCase()
-    // 2. If cookie-av's attribute-value is a case-insensitive match for
-    //    "None", set enforcement to "None".
-    if (attributeValueLowercase.includes('none')) {
-      enforcement = 'None'
-    }
 
-    // 3. If cookie-av's attribute-value is a case-insensitive match for
-    //    "Strict", set enforcement to "Strict".
-    if (attributeValueLowercase.includes('strict')) {
-      enforcement = 'Strict'
+    // 1. If cookie-av's attribute-value is a case-insensitive match for
+    //    "None", append an attribute to the cookie-attribute-list with an
+    //    attribute-name of "SameSite" and an attribute-value of "None".
+    if (attributeValueLowercase === 'none') {
+      cookieAttributeList.sameSite = 'None'
+    } else if (attributeValueLowercase === 'strict') {
+      // 2. If cookie-av's attribute-value is a case-insensitive match for
+      //    "Strict", append an attribute to the cookie-attribute-list with
+      //    an attribute-name of "SameSite" and an attribute-value of
+      //    "Strict".
+      cookieAttributeList.sameSite = 'Strict'
+    } else if (attributeValueLowercase === 'lax') {
+      // 3. If cookie-av's attribute-value is a case-insensitive match for
+      //    "Lax", append an attribute to the cookie-attribute-list with an
+      //    attribute-name of "SameSite" and an attribute-value of "Lax".
+      cookieAttributeList.sameSite = 'Lax'
     }
-
-    // 4. If cookie-av's attribute-value is a case-insensitive match for
-    //    "Lax", set enforcement to "Lax".
-    if (attributeValueLowercase.includes('lax')) {
-      enforcement = 'Lax'
-    }
-
-    // 5. Append an attribute to the cookie-attribute-list with an
-    //    attribute-name of "SameSite" and an attribute-value of
-    //    enforcement.
-    cookieAttributeList.sameSite = enforcement
   } else {
     cookieAttributeList.unparsed ??= []
 
@@ -75799,40 +75958,35 @@ const tail = Buffer.from([0x00, 0x00, 0xff, 0xff])
 const kBuffer = Symbol('kBuffer')
 const kLength = Symbol('kLength')
 
-// Default maximum decompressed message size: 4 MB
-const kDefaultMaxDecompressedSize = 4 * 1024 * 1024
-
 class PerMessageDeflate {
   /** @type {import('node:zlib').InflateRaw} */
   #inflate
 
   #options = {}
 
-  /** @type {boolean} */
-  #aborted = false
-
-  /** @type {Function|null} */
-  #currentCallback = null
+  #maxPayloadSize = 0
 
   /**
    * @param {Map<string, string>} extensions
    */
-  constructor (extensions) {
+  constructor (extensions, options) {
     this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover')
     this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits')
+
+    this.#maxPayloadSize = options.maxPayloadSize
   }
 
+  /**
+   * Decompress a compressed payload.
+   * @param {Buffer} chunk Compressed data
+   * @param {boolean} fin Final fragment flag
+   * @param {Function} callback Callback function
+   */
   decompress (chunk, fin, callback) {
     // An endpoint uses the following algorithm to decompress a message.
     // 1.  Append 4 octets of 0x00 0x00 0xff 0xff to the tail end of the
     //     payload of the message.
     // 2.  Decompress the resulting data using DEFLATE.
-
-    if (this.#aborted) {
-      callback(new MessageSizeExceededError())
-      return
-    }
-
     if (!this.#inflate) {
       let windowBits = Z_DEFAULT_WINDOWBITS
 
@@ -75855,23 +76009,12 @@ class PerMessageDeflate {
       this.#inflate[kLength] = 0
 
       this.#inflate.on('data', (data) => {
-        if (this.#aborted) {
-          return
-        }
-
         this.#inflate[kLength] += data.length
 
-        if (this.#inflate[kLength] > kDefaultMaxDecompressedSize) {
-          this.#aborted = true
+        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
+          callback(new MessageSizeExceededError())
           this.#inflate.removeAllListeners()
-          this.#inflate.destroy()
           this.#inflate = null
-
-          if (this.#currentCallback) {
-            const cb = this.#currentCallback
-            this.#currentCallback = null
-            cb(new MessageSizeExceededError())
-          }
           return
         }
 
@@ -75884,14 +76027,13 @@ class PerMessageDeflate {
       })
     }
 
-    this.#currentCallback = callback
     this.#inflate.write(chunk)
     if (fin) {
       this.#inflate.write(tail)
     }
 
     this.#inflate.flush(() => {
-      if (this.#aborted || !this.#inflate) {
+      if (!this.#inflate) {
         return
       }
 
@@ -75899,7 +76041,6 @@ class PerMessageDeflate {
 
       this.#inflate[kBuffer].length = 0
       this.#inflate[kLength] = 0
-      this.#currentCallback = null
 
       callback(null, full)
     })
@@ -75935,6 +76076,12 @@ const {
 const { WebsocketFrameSend } = __nccwpck_require__(3264)
 const { closeWebSocketConnection } = __nccwpck_require__(86897)
 const { PerMessageDeflate } = __nccwpck_require__(19469)
+const { MessageSizeExceededError } = __nccwpck_require__(68707)
+
+function failWebsocketConnectionWithCode (ws, code, reason) {
+  closeWebSocketConnection(ws, code, reason, Buffer.byteLength(reason))
+  failWebsocketConnection(ws, reason)
+}
 
 // This code was influenced by ws released under the MIT license.
 // Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
@@ -75943,6 +76090,7 @@ const { PerMessageDeflate } = __nccwpck_require__(19469)
 
 class ByteParser extends Writable {
   #buffers = []
+  #fragmentsBytes = 0
   #byteOffset = 0
   #loop = false
 
@@ -75954,18 +76102,27 @@ class ByteParser extends Writable {
   /** @type {Map<string, PerMessageDeflate>} */
   #extensions
 
+  /** @type {number} */
+  #maxFragments
+
+  /** @type {number} */
+  #maxPayloadSize
+
   /**
    * @param {import('./websocket').WebSocket} ws
    * @param {Map<string, string>|null} extensions
+   * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
    */
-  constructor (ws, extensions) {
+  constructor (ws, extensions, options = {}) {
     super()
 
     this.ws = ws
     this.#extensions = extensions == null ? new Map() : extensions
+    this.#maxFragments = options.maxFragments ?? 0
+    this.#maxPayloadSize = options.maxPayloadSize ?? 0
 
     if (this.#extensions.has('permessage-deflate')) {
-      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions))
+      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options))
     }
   }
 
@@ -75979,6 +76136,19 @@ class ByteParser extends Writable {
     this.#loop = true
 
     this.run(callback)
+  }
+
+  #validatePayloadLength () {
+    if (
+      this.#maxPayloadSize > 0 &&
+      !isControlFrame(this.#info.opcode) &&
+      this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize
+    ) {
+      failWebsocketConnectionWithCode(this.ws, 1009, 'Payload size exceeds maximum allowed size')
+      return false
+    }
+
+    return true
   }
 
   /**
@@ -76069,6 +76239,10 @@ class ByteParser extends Writable {
         if (payloadLength <= 125) {
           this.#info.payloadLength = payloadLength
           this.#state = parserStates.READ_DATA
+
+          if (!this.#validatePayloadLength()) {
+            return
+          }
         } else if (payloadLength === 126) {
           this.#state = parserStates.PAYLOADLENGTH_16
         } else if (payloadLength === 127) {
@@ -76093,6 +76267,10 @@ class ByteParser extends Writable {
 
         this.#info.payloadLength = buffer.readUInt16BE(0)
         this.#state = parserStates.READ_DATA
+
+        if (!this.#validatePayloadLength()) {
+          return
+        }
       } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
         if (this.#byteOffset < 8) {
           return callback()
@@ -76115,6 +76293,10 @@ class ByteParser extends Writable {
 
         this.#info.payloadLength = lower
         this.#state = parserStates.READ_DATA
+
+        if (!this.#validatePayloadLength()) {
+          return
+        }
       } else if (this.#state === parserStates.READ_DATA) {
         if (this.#byteOffset < this.#info.payloadLength) {
           return callback()
@@ -76127,42 +76309,58 @@ class ByteParser extends Writable {
           this.#state = parserStates.INFO
         } else {
           if (!this.#info.compressed) {
-            this.#fragments.push(body)
+            if (!this.writeFragments(body)) {
+              return
+            }
+
+            if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+              failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message)
+              return
+            }
 
             // If the frame is not fragmented, a message has been received.
             // If the frame is fragmented, it will terminate with a fin bit set
             // and an opcode of 0 (continuation), therefore we handle that when
             // parsing continuation frames, not here.
             if (!this.#info.fragmented && this.#info.fin) {
-              const fullMessage = Buffer.concat(this.#fragments)
-              websocketMessageReceived(this.ws, this.#info.binaryType, fullMessage)
-              this.#fragments.length = 0
+              websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments())
             }
 
             this.#state = parserStates.INFO
           } else {
-            this.#extensions.get('permessage-deflate').decompress(body, this.#info.fin, (error, data) => {
-              if (error) {
-                failWebsocketConnection(this.ws, error.message)
-                return
-              }
+            this.#extensions.get('permessage-deflate').decompress(
+              body,
+              this.#info.fin,
+              (error, data) => {
+                if (error) {
+                  const code = error instanceof MessageSizeExceededError ? 1009 : 1007
+                  failWebsocketConnectionWithCode(this.ws, code, error.message)
+                  return
+                }
 
-              this.#fragments.push(data)
+                if (!this.writeFragments(data)) {
+                  return
+                }
 
-              if (!this.#info.fin) {
-                this.#state = parserStates.INFO
+                if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+                  failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message)
+                  return
+                }
+
+                if (!this.#info.fin) {
+                  this.#state = parserStates.INFO
+                  this.#loop = true
+                  this.run(callback)
+                  return
+                }
+
+                websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments())
+
                 this.#loop = true
+                this.#state = parserStates.INFO
                 this.run(callback)
-                return
               }
-
-              websocketMessageReceived(this.ws, this.#info.binaryType, Buffer.concat(this.#fragments))
-
-              this.#loop = true
-              this.#state = parserStates.INFO
-              this.#fragments.length = 0
-              this.run(callback)
-            })
+            )
 
             this.#loop = false
             break
@@ -76212,6 +76410,35 @@ class ByteParser extends Writable {
     this.#byteOffset -= n
 
     return buffer
+  }
+
+  writeFragments (fragment) {
+    if (
+      this.#maxFragments > 0 &&
+      this.#fragments.length === this.#maxFragments
+    ) {
+      failWebsocketConnectionWithCode(this.ws, 1008, 'Too many message fragments')
+      return false
+    }
+
+    this.#fragmentsBytes += fragment.length
+    this.#fragments.push(fragment)
+    return true
+  }
+
+  consumeFragments () {
+    const fragments = this.#fragments
+
+    if (fragments.length === 1) {
+      this.#fragmentsBytes = 0
+      return fragments.shift()
+    }
+
+    const output = Buffer.concat(fragments, this.#fragmentsBytes)
+    this.#fragments = []
+    this.#fragmentsBytes = 0
+
+    return output
   }
 
   parseCloseBody (data) {
@@ -77249,7 +77476,14 @@ class WebSocket extends EventTarget {
     // once this happens, the connection is open
     this[kResponse] = response
 
-    const parser = new ByteParser(this, parsedExtensions)
+    const webSocketOptions = this[kController]?.dispatcher?.webSocketOptions
+    const maxFragments = webSocketOptions?.maxFragments
+    const maxPayloadSize = webSocketOptions?.maxPayloadSize
+
+    const parser = new ByteParser(this, parsedExtensions, {
+      maxFragments,
+      maxPayloadSize
+    })
     parser.on('drain', onParserDrain)
     parser.on('error', onParserError.bind(this))
 
@@ -77598,9 +77832,12 @@ const CACHE_KEY_PREFIX = 'setup-java';
 const supportedPackageManager = [
     {
         id: 'maven',
-        path: [(0, path_1.join)(os_1.default.homedir(), '.m2', 'repository')],
+        path: [
+            (0, path_1.join)(os_1.default.homedir(), '.m2', 'repository'),
+            (0, path_1.join)(os_1.default.homedir(), '.m2', 'wrapper', 'dists')
+        ],
         // https://github.com/actions/cache/blob/0638051e9af2c23d10bb70fa9beffcad6cff9ce3/examples.md#java---maven
-        pattern: ['**/pom.xml']
+        pattern: ['**/pom.xml', '**/.mvn/wrapper/maven-wrapper.properties']
     },
     {
         id: 'gradle',
@@ -77713,7 +77950,15 @@ function save(id) {
             return;
         }
         try {
-            yield cache.saveCache(packageManager.path, primaryKey);
+            const cacheId = yield cache.saveCache(packageManager.path, primaryKey);
+            if (cacheId === -1) {
+                // saveCache returns -1 without throwing when the cache was not saved,
+                // e.g. a reserve collision or a read-only token (fork PR). @actions/cache
+                // has already logged the reason at the appropriate severity, so just
+                // trace it instead of misreporting that the cache was saved.
+                core.debug(`Cache was not saved for the key: ${primaryKey}`);
+                return;
+            }
             core.info(`Cache saved with the key: ${primaryKey}`);
         }
         catch (error) {
@@ -77755,7 +78000,7 @@ function isProbablyGradleDaemonProblem(packageManager, error) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DISTRIBUTIONS_ONLY_MAJOR_VERSION = exports.INPUT_MVN_TOOLCHAIN_VENDOR = exports.INPUT_MVN_TOOLCHAIN_ID = exports.MVN_TOOLCHAINS_FILE = exports.MVN_SETTINGS_FILE = exports.M2_DIR = exports.STATE_GPG_PRIVATE_KEY_FINGERPRINT = exports.INPUT_JOB_STATUS = exports.INPUT_CACHE_DEPENDENCY_PATH = exports.INPUT_CACHE = exports.INPUT_DEFAULT_GPG_PASSPHRASE = exports.INPUT_DEFAULT_GPG_PRIVATE_KEY = exports.INPUT_GPG_PASSPHRASE = exports.INPUT_GPG_PRIVATE_KEY = exports.INPUT_OVERWRITE_SETTINGS = exports.INPUT_SETTINGS_PATH = exports.INPUT_SERVER_PASSWORD = exports.INPUT_SERVER_USERNAME = exports.INPUT_SERVER_ID = exports.INPUT_CHECK_LATEST = exports.INPUT_JDK_FILE = exports.INPUT_DISTRIBUTION = exports.INPUT_JAVA_PACKAGE = exports.INPUT_ARCHITECTURE = exports.INPUT_JAVA_VERSION_FILE = exports.INPUT_JAVA_VERSION = exports.MACOS_JAVA_CONTENT_POSTFIX = void 0;
+exports.DISTRIBUTIONS_ONLY_MAJOR_VERSION = exports.INPUT_MVN_TOOLCHAIN_VENDOR = exports.INPUT_MVN_TOOLCHAIN_ID = exports.MVN_TOOLCHAINS_FILE = exports.MVN_SETTINGS_FILE = exports.M2_DIR = exports.STATE_GPG_PRIVATE_KEY_FINGERPRINT = exports.INPUT_JOB_STATUS = exports.INPUT_CACHE_DEPENDENCY_PATH = exports.INPUT_CACHE = exports.INPUT_DEFAULT_GPG_PASSPHRASE = exports.INPUT_DEFAULT_GPG_PRIVATE_KEY = exports.INPUT_GPG_PASSPHRASE = exports.INPUT_GPG_PRIVATE_KEY = exports.INPUT_OVERWRITE_SETTINGS = exports.INPUT_SETTINGS_PATH = exports.INPUT_SERVER_PASSWORD = exports.INPUT_SERVER_USERNAME = exports.INPUT_SERVER_ID = exports.INPUT_VERIFY_SIGNATURE_PUBLIC_KEY = exports.INPUT_VERIFY_SIGNATURE = exports.INPUT_CHECK_LATEST = exports.INPUT_JDK_FILE = exports.INPUT_DISTRIBUTION = exports.INPUT_JAVA_PACKAGE = exports.INPUT_ARCHITECTURE = exports.INPUT_JAVA_VERSION_FILE = exports.INPUT_JAVA_VERSION = exports.MACOS_JAVA_CONTENT_POSTFIX = void 0;
 exports.MACOS_JAVA_CONTENT_POSTFIX = 'Contents/Home';
 exports.INPUT_JAVA_VERSION = 'java-version';
 exports.INPUT_JAVA_VERSION_FILE = 'java-version-file';
@@ -77764,6 +78009,8 @@ exports.INPUT_JAVA_PACKAGE = 'java-package';
 exports.INPUT_DISTRIBUTION = 'distribution';
 exports.INPUT_JDK_FILE = 'jdkFile';
 exports.INPUT_CHECK_LATEST = 'check-latest';
+exports.INPUT_VERIFY_SIGNATURE = 'verify-signature';
+exports.INPUT_VERIFY_SIGNATURE_PUBLIC_KEY = 'verify-signature-public-key';
 exports.INPUT_SERVER_ID = 'server-id';
 exports.INPUT_SERVER_USERNAME = 'server-username';
 exports.INPUT_SERVER_PASSWORD = 'server-password';
@@ -78063,6 +78310,7 @@ const constants_1 = __nccwpck_require__(27242);
 const os_1 = __importDefault(__nccwpck_require__(70857));
 class JavaBase {
     constructor(distribution, installerOptions) {
+        var _a;
         this.distribution = distribution;
         this.http = new httpm.HttpClient('actions/setup-java', undefined, {
             allowRetries: true,
@@ -78072,10 +78320,15 @@ class JavaBase {
         this.architecture = installerOptions.architecture || os_1.default.arch();
         this.packageType = installerOptions.packageType;
         this.checkLatest = installerOptions.checkLatest;
+        this.verifySignature = (_a = installerOptions.verifySignature) !== null && _a !== void 0 ? _a : false;
+        this.verifySignaturePublicKey = installerOptions.verifySignaturePublicKey;
     }
     setupJava() {
         var _a, _b;
         return __awaiter(this, void 0, void 0, function* () {
+            if (this.verifySignature && !this.supportsSignatureVerification()) {
+                throw new Error(`Input 'verify-signature' is not supported for distribution '${this.distribution}'.`);
+            }
             let foundJava = this.findInToolcache();
             if (foundJava && !this.checkLatest) {
                 core.info(`Resolved Java ${foundJava.version} from tool-cache`);
@@ -78194,6 +78447,9 @@ class JavaBase {
     }
     get toolcacheFolderName() {
         return `Java_${this.distribution}_${this.packageType}`;
+    }
+    supportsSignatureVerification() {
+        return false;
     }
     getToolcacheVersionName(version) {
         if (!this.stable) {
@@ -78526,6 +78782,7 @@ var JavaDistribution;
     JavaDistribution["Dragonwell"] = "dragonwell";
     JavaDistribution["SapMachine"] = "sapmachine";
     JavaDistribution["GraalVM"] = "graalvm";
+    JavaDistribution["GraalVMCommunity"] = "graalvm-community";
     JavaDistribution["JetBrains"] = "jetbrains";
 })(JavaDistribution || (JavaDistribution = {}));
 function getJavaDistribution(distributionName, installerOptions, jdkFile) {
@@ -78557,6 +78814,8 @@ function getJavaDistribution(distributionName, installerOptions, jdkFile) {
             return new installer_11.SapMachineDistribution(installerOptions);
         case JavaDistribution.GraalVM:
             return new installer_12.GraalVMDistribution(installerOptions);
+        case JavaDistribution.GraalVMCommunity:
+            return new installer_12.GraalVMCommunityDistribution(installerOptions);
         case JavaDistribution.JetBrains:
             return new installer_13.JetBrainsDistribution(installerOptions);
         default:
@@ -78824,23 +79083,29 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.GraalVMDistribution = void 0;
+exports.GraalVMCommunityDistribution = exports.GraalVMDistribution = void 0;
 const core = __importStar(__nccwpck_require__(37484));
 const tc = __importStar(__nccwpck_require__(33472));
 const fs_1 = __importDefault(__nccwpck_require__(79896));
 const path_1 = __importDefault(__nccwpck_require__(16928));
+const semver_1 = __importDefault(__nccwpck_require__(62088));
 const base_installer_1 = __nccwpck_require__(79935);
 const http_client_1 = __nccwpck_require__(54844);
 const util_1 = __nccwpck_require__(54527);
 const GRAALVM_DL_BASE = 'https://download.oracle.com/graalvm';
 const GRAALVM_DOWNLOAD_URL = 'https://www.graalvm.org/downloads/';
+const GRAALVM_COMMUNITY_RELEASES_URL = 'https://api.github.com/repos/graalvm/graalvm-ce-builds/releases?per_page=100';
+const GRAALVM_COMMUNITY_RELEASES_PAGE_ORIGIN = 'https://api.github.com';
+const GRAALVM_COMMUNITY_DOWNLOAD_URL = 'https://github.com/graalvm/graalvm-ce-builds/releases';
+const GRAALVM_COMMUNITY_ASSET_PREFIX = 'graalvm-community-jdk-';
+const GRAALVM_COMMUNITY_VERSION_PATTERN = /^\d+(?:\.\d+)*$/;
 const IS_WINDOWS = process.platform === 'win32';
 const GRAALVM_PLATFORM = IS_WINDOWS ? 'windows' : process.platform;
 const GRAALVM_MIN_VERSION = 17;
 const SUPPORTED_ARCHITECTURES = ['x64', 'aarch64'];
 class GraalVMDistribution extends base_installer_1.JavaBase {
-    constructor(installerOptions) {
-        super('GraalVM', installerOptions);
+    constructor(installerOptions, distributionName = 'GraalVM') {
+        super(distributionName, installerOptions);
     }
     downloadTool(javaRelease) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -78874,35 +79139,49 @@ class GraalVMDistribution extends base_installer_1.JavaBase {
     }
     findPackageForDownload(range) {
         return __awaiter(this, void 0, void 0, function* () {
-            // Add input validation
-            if (!range || typeof range !== 'string') {
-                throw new Error('Version range is required and must be a string');
-            }
-            const arch = this.distributionArchitecture();
-            if (!SUPPORTED_ARCHITECTURES.includes(arch)) {
-                throw new Error(`Unsupported architecture: ${this.architecture}. Supported architectures are: ${SUPPORTED_ARCHITECTURES.join(', ')}`);
-            }
+            this.validateVersionRange(range);
+            const arch = this.getSupportedArchitecture();
             if (!this.stable) {
                 return this.findEABuildDownloadUrl(`${range}-ea`);
             }
-            if (this.packageType !== 'jdk') {
-                throw new Error('GraalVM provides only the `jdk` package type');
-            }
-            const platform = this.getPlatform();
-            const extension = (0, util_1.getDownloadArchiveExtension)();
-            const major = range.includes('.') ? range.split('.')[0] : range;
-            const majorVersion = parseInt(major);
-            if (isNaN(majorVersion)) {
-                throw new Error(`Invalid version format: ${range}`);
-            }
-            if (majorVersion < GRAALVM_MIN_VERSION) {
-                throw new Error(`GraalVM is only supported for JDK ${GRAALVM_MIN_VERSION} and later. Requested version: ${major}`);
-            }
+            const { platform, extension, major } = this.validateStableBuildRequest(range);
             const fileUrl = this.constructFileUrl(range, major, platform, arch, extension);
             const response = yield this.http.head(fileUrl);
             this.handleHttpResponse(response, range);
             return { url: fileUrl, version: range };
         });
+    }
+    validateVersionRange(range) {
+        if (!range || typeof range !== 'string') {
+            throw new Error('Version range is required and must be a string');
+        }
+    }
+    getSupportedArchitecture() {
+        const arch = this.distributionArchitecture();
+        if (!SUPPORTED_ARCHITECTURES.includes(arch)) {
+            throw new Error(`Unsupported architecture: ${this.architecture}. Supported architectures are: ${SUPPORTED_ARCHITECTURES.join(', ')}`);
+        }
+        return arch;
+    }
+    validateStableBuildRequest(range) {
+        if (this.packageType !== 'jdk') {
+            throw new Error(`${this.distribution} provides only the \`jdk\` package type`);
+        }
+        const platform = this.getPlatform();
+        const extension = (0, util_1.getDownloadArchiveExtension)();
+        const major = range.includes('.') ? range.split('.')[0] : range;
+        const majorVersion = parseInt(major);
+        if (isNaN(majorVersion)) {
+            throw new Error(`Invalid version format: ${range}`);
+        }
+        if (majorVersion < GRAALVM_MIN_VERSION) {
+            throw new Error(`${this.distribution} is only supported for JDK ${GRAALVM_MIN_VERSION} and later. Requested version: ${major}`);
+        }
+        return {
+            platform,
+            major,
+            extension
+        };
     }
     constructFileUrl(range, major, platform, arch, extension) {
         return range.includes('.')
@@ -78994,6 +79273,101 @@ class GraalVMDistribution extends base_installer_1.JavaBase {
     }
 }
 exports.GraalVMDistribution = GraalVMDistribution;
+class GraalVMCommunityDistribution extends GraalVMDistribution {
+    constructor(installerOptions) {
+        super(installerOptions, 'GraalVM Community');
+    }
+    get toolcacheFolderName() {
+        return `Java_GraalVM_Community_${this.packageType}`;
+    }
+    findPackageForDownload(range) {
+        return __awaiter(this, void 0, void 0, function* () {
+            this.validateVersionRange(range);
+            if (!this.stable) {
+                throw new Error('GraalVM Community does not provide early access builds');
+            }
+            const arch = this.getSupportedArchitecture();
+            const { platform, extension } = this.validateStableBuildRequest(range);
+            // GraalVM Community asset names embed the platform, architecture and
+            // archive type, e.g. `graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz`.
+            const assetSuffix = `_${platform}-${arch}_bin.${extension}`;
+            const availableVersions = yield this.getAvailableVersions(assetSuffix);
+            const satisfiedVersion = availableVersions
+                .filter(item => (0, util_1.isVersionSatisfies)(range, item.version))
+                .sort((a, b) => -semver_1.default.compareBuild(a.version, b.version))[0];
+            if (!satisfiedVersion) {
+                const error = this.createVersionNotFoundError(range, availableVersions.map(item => item.version), `Platform: ${platform}`);
+                error.message += `\nPlease check if this version is available at ${GRAALVM_COMMUNITY_DOWNLOAD_URL}.`;
+                throw error;
+            }
+            return satisfiedVersion;
+        });
+    }
+    getAvailableVersions(assetSuffix) {
+        var _a;
+        return __awaiter(this, void 0, void 0, function* () {
+            const headers = (0, util_1.getGitHubHttpHeaders)();
+            const versions = new Map();
+            let releasesUrl = GRAALVM_COMMUNITY_RELEASES_URL;
+            for (let pageIndex = 0; releasesUrl && pageIndex < util_1.MAX_PAGINATION_PAGES; pageIndex++) {
+                const response = yield this.http.getJson(releasesUrl, headers);
+                // A successful GitHub releases listing is always a JSON array (possibly
+                // empty). Anything else indicates an unexpected/error payload (rate
+                // limiting, auth failure, etc.) that must be surfaced instead of being
+                // silently treated as "no releases", which would later look like a
+                // misleading "version not found" error.
+                if (!Array.isArray(response.result)) {
+                    throw new Error(`Unexpected response while listing GraalVM Community releases from ${releasesUrl} ` +
+                        `(HTTP status code: ${response.statusCode}). Expected a JSON array of releases. ` +
+                        `Please check if the service is available at ${GRAALVM_COMMUNITY_DOWNLOAD_URL}.`);
+                }
+                const releases = response.result;
+                if (releases.length === 0) {
+                    break;
+                }
+                for (const release of releases) {
+                    if (release.draft || release.prerelease) {
+                        continue;
+                    }
+                    for (const asset of (_a = release.assets) !== null && _a !== void 0 ? _a : []) {
+                        const version = this.extractAssetVersion(asset.name, assetSuffix);
+                        if (version) {
+                            versions.set(version, {
+                                version,
+                                url: asset.browser_download_url
+                            });
+                        }
+                    }
+                }
+                releasesUrl = this.getNextReleasesUrl(response.headers);
+            }
+            return [...versions.values()];
+        });
+    }
+    // Returns the GraalVM JDK version encoded in a release asset name when it
+    // matches the requested platform/architecture/archive suffix, otherwise null.
+    extractAssetVersion(assetName, assetSuffix) {
+        if (!assetName.startsWith(GRAALVM_COMMUNITY_ASSET_PREFIX) ||
+            !assetName.endsWith(assetSuffix)) {
+            return null;
+        }
+        const rawVersion = assetName.slice(GRAALVM_COMMUNITY_ASSET_PREFIX.length, -assetSuffix.length);
+        if (!GRAALVM_COMMUNITY_VERSION_PATTERN.test(rawVersion)) {
+            return null;
+        }
+        return (0, util_1.convertVersionToSemver)(rawVersion);
+    }
+    getNextReleasesUrl(headers) {
+        const nextUrl = (0, util_1.getNextPageUrlFromLinkHeader)(headers);
+        if (nextUrl &&
+            !(0, util_1.validatePaginationUrl)(nextUrl, GRAALVM_COMMUNITY_RELEASES_PAGE_ORIGIN)) {
+            core.warning(`Ignoring pagination link with unexpected origin: ${nextUrl}`);
+            return null;
+        }
+        return nextUrl;
+    }
+}
+exports.GraalVMCommunityDistribution = GraalVMCommunityDistribution;
 
 
 /***/ }),
@@ -79549,21 +79923,38 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MicrosoftDistributions = void 0;
+exports.MicrosoftDistributions = exports.MICROSOFT_PUBLIC_KEY = void 0;
 const base_installer_1 = __nccwpck_require__(79935);
 const util_1 = __nccwpck_require__(54527);
+const gpg = __importStar(__nccwpck_require__(88343));
+const microsoft_key_1 = __nccwpck_require__(56286);
 const core = __importStar(__nccwpck_require__(37484));
 const tc = __importStar(__nccwpck_require__(33472));
 const fs_1 = __importDefault(__nccwpck_require__(79896));
 const path_1 = __importDefault(__nccwpck_require__(16928));
+var microsoft_key_2 = __nccwpck_require__(56286);
+Object.defineProperty(exports, "MICROSOFT_PUBLIC_KEY", ({ enumerable: true, get: function () { return microsoft_key_2.MICROSOFT_PUBLIC_KEY; } }));
 class MicrosoftDistributions extends base_installer_1.JavaBase {
     constructor(installerOptions) {
         super('Microsoft', installerOptions);
     }
     downloadTool(javaRelease) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            if (this.verifySignature) {
+                if (!javaRelease.signatureUrl) {
+                    throw new Error(`Input 'verify-signature' is enabled, but no signature URL was found for Microsoft Build of OpenJDK version ${javaRelease.version}.`);
+                }
+                core.info(`Verifying Java package signature...`);
+                try {
+                    yield gpg.verifyPackageSignature(javaArchivePath, javaRelease.signatureUrl, (_a = this.verifySignaturePublicKey) !== null && _a !== void 0 ? _a : microsoft_key_1.MICROSOFT_PUBLIC_KEY);
+                }
+                catch (error) {
+                    throw new Error(`Failed to verify signature for Microsoft Build of OpenJDK version ${javaRelease.version}. Signature URL: ${javaRelease.signatureUrl}. Error: ${error.message}`);
+                }
+            }
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -79577,6 +79968,7 @@ class MicrosoftDistributions extends base_installer_1.JavaBase {
         });
     }
     findPackageForDownload(range) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             const arch = this.distributionArchitecture();
             if (arch !== 'x64' && arch !== 'aarch64') {
@@ -79597,11 +79989,17 @@ class MicrosoftDistributions extends base_installer_1.JavaBase {
                 const availableVersionStrings = manifest.map(item => item.version);
                 throw this.createVersionNotFoundError(range, availableVersionStrings);
             }
+            const file = foundRelease.files[0];
+            const signatureUrl = (_a = file.signature_url) !== null && _a !== void 0 ? _a : `${file.download_url}.sig`;
             return {
-                url: foundRelease.files[0].download_url,
+                url: file.download_url,
+                signatureUrl,
                 version: foundRelease.version
             };
         });
+    }
+    supportsSignatureVerification() {
+        return true;
     }
     getAvailableVersions() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -79643,6 +80041,38 @@ class MicrosoftDistributions extends base_installer_1.JavaBase {
     }
 }
 exports.MicrosoftDistributions = MicrosoftDistributions;
+
+
+/***/ }),
+
+/***/ 56286:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MICROSOFT_PUBLIC_KEY = void 0;
+// Microsoft Build of OpenJDK GPG signing key
+// Retrieved from: https://download.visualstudio.microsoft.com/download/pr/b90071e2-e0cf-4411-98be-dbeb09d67bf0/8622862bcd54206e158c5abca0582c9b/464279_464280_aoc_20210208.asc
+exports.MICROSOFT_PUBLIC_KEY = `-----BEGIN PGP PUBLIC KEY BLOCK-----
+Version: BSN Pgp v1.1.0.0
+
+mQENBGAhlWcBCADCQjj6huLTenvZSLej35e9YKEHm4lix2uvPOONexMaU8V2v7KL
+RGdoXF7jwHci7efnPZ+9zpS2+g3rhvv8M7yWy9E/1psEtGzvmp1IL/qIabMEQqi+
+UlhPGh7MQ/BkXAlic8Dyl3XYqr0EXS11iCiTr6Zkxs9Ee4V54gxL4gogRn4wk9sl
+/nrjgDzMsUwla0pynoQQvYpqCdiAr3gKKllT1skCDqgVOMMyZxsx9HjZxg/3AJz6
+r5i512L2R+3Hkv+XmxT+mnGBCFcny0DM7PjNXEmIK3ZSkro1tQML90zx3Fyh5esx
+fpVvuIXGFV75o35VVCBZoiD3hcfOnIJsPQ9nABEBAAG0OE1pY3Jvc29mdCBKYXZh
+IEVuZ2luZWVyaW5nIDxqYXZhcGxhdGluZnJhQG1pY3Jvc29mdC5jb20+iQE4BBMB
+CAAiBQJgIZVnAhsDBgsJCAcDAgYVCAIJCgsEFgIDAQIeAQIXgAAKCRA1Ux0xWyHB
+icwTCACJO2FGNocNvdUtAb+eDKuGwt0chAJdCES2ZtgBScwrwDyWpxpRznoXWBHL
+MJeLyxJoKsCG3vVlY4uh48psCzVm3OKvi7MCPT955t8W6TzfSBxTpjR8zRgJkjPJ
+EGhHTlusUfz7TtM5etJF0qscSJH1grcNsgtee97mk4QyEzT8Di83NQmYxKcBrliq
+yK/SWWt8VkTyYAEO6L5PoB4L9r8ka27uQs+jgCw+/Z0JMtNmmhyNGY3+a1YtPeoy
+JdQaI9LphfKGbVaz6SK2aol7vj+c2TG3TLUYdOYGMH1OZlri2GTkCVjwna2GC7p4
+Fa133tP85xzJEq1XeXm8WeLFo2wV
+=rHCS
+-----END PGP PUBLIC KEY BLOCK-----`;
 
 
 /***/ }),
@@ -80197,6 +80627,50 @@ exports.SemeruDistribution = SemeruDistribution;
 
 /***/ }),
 
+/***/ 80877:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ADOPTIUM_PUBLIC_KEY = void 0;
+// Adoptium GPG signing key (fingerprint: 3B04D753C9050D9A5D343F39843C48A565F8F04B)
+// Retrieved from: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3B04D753C9050D9A5D343F39843C48A565F8F04B
+exports.ADOPTIUM_PUBLIC_KEY = `-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+xsBNBGGTvTQBCAC6ey144n7CG8foafF6mwgIBN1fIm1ILZDuGS4tMr0/XI8pgJnT
+QvsPxZWEvtSm7bEMObzEoZJcXwjBcJl1B0ui8k5kHMTI75gCmZPsoKLFWIEpuRBQ
+PBocusw80apDmLnNDQLVQvDFtEua5gaNa/fRw9YsmBoXBqvgrjFUIdGyWoQvH5+a
+9OYlWD9n5VV0gnVMb+aclwVzB/zJw3kHGSgzuMtlAHeQiah7Y8yomQn/UIX8yqDf
++11sP3+c87YcjkRqImRTtmKEDcEtGPAIXC6SYA+uEEkbYE0Fy0chkvtnVWJ597fa
+Epai4rnICU8zoJ6X5z3v1aM2WerhX9oq9X8PABEBAAHNQEFkb3B0aXVtIEdQRyBL
+ZXkgKERFQi9SUE0gU2lnbmluZyBLZXkpIDx0ZW11cmluLWRldkBlY2xpcHNlLm9y
+Zz7CwJIEEwEIADwWIQQ7BNdTyQUNml00PzmEPEilZfjwSwUCYZO9NAIbAwULCQgH
+AgMiAgEGFQoJCAsCBBYCAwECHgcCF4AACgkQhDxIpWX48Et4AggAjjJzYWuKV3nG
+7ngInngl8G/m9JoHr7BmwgcQXYhdy5hVkMcUx5JLeXz2LMBUH/F2nD595hgjMabk
+kVib20X8lq9RsNbdfc2hBcWU6qyHKxsIqT4boI2/XDyEzzMyyZWWNGo/27Ci7Xmj
+pWu31nh0pDdPqdyWDIKojbVVnxlCRY8as8Sm+1ufi709KCi4MuwHNsUlCSwb/fju
+NKeHkrHbLcHKUUIEcmTSKRWrpMYBzm1HYOGBz4xPuELwUfUp71ehfoyBZlp6RDRf
+l5TYI1FmCyHuvjNhrJgWv7bOTcf8yObGY+TEUhzc4xQqCrF4ur9d3opvsuPBQsv+
+Klqi5KSZgs7ATQRhk700AQgAq14okly8cFrpYVenEQPiB75AUZfKRpMduiR6IxAj
+SKcH7aSoFZ9AubUEBVpZsyT5svxoEPe1i4TdbF+m9FGy42EcOlLa3ArLTj5H8FRl
+UdGZB9I5mk4GptOzPM+aHMMu92vW/ZwjuS8DvOiQSp+cUmG1EqOMJSM7e/4BM71z
+E+OKaVJCj79pEzhG3SK/IC/OlxxyETT66NSfYJd7Sw5R6Vr19am/uNU690W0CJ+q
+VQeFpmDMr7LnfdFRIh+lJe05+PvWXeidkGjox5cbG52wf8aRIR/FgkfcFvqRMN1f
+B+dVOWueloUeVAnzcUznOKmUEs7LP9ObJhYHHgup4IAU2wARAQABwsB2BBgBCAAg
+FiEEOwTXU8kFDZpdND85hDxIpWX48EsFAmGTvTQCGwwACgkQhDxIpWX48EvXHQf/
+Q0nZsGDXnZHiBoojeSdpkO7WBjMIP3w1GdLvRpPQrS8TfOPbZuoevzCNh38Y3gwF
+yelJspvzDQrBXhgkzAGlucYg8Y7KHa5Ebm7iDgMzc37L1hYSZTYCqwd7aowfgy34
+hOk3B67LffkJpIh738Oa9CtlwxQ9xcytmBmQ1fBBOwm/9IhAwHPQuydYIs4DxWbj
+0MGSP4fDntU7e4UjsHNmhudDcYol0FaqdHHIIB9C/G4CzetRwHFOn3b4JwXMU7YU
+6aJA3mXhi3hggMC3wkT2HHZ/TquuOdNc02fypWOCDOHz0alBBJNqoVUNFNqU3tfJ
+wI4qF/KKq9BfyfucAs0ykA==
+=XLag
+-----END PGP PUBLIC KEY BLOCK-----`;
+
+
+/***/ }),
+
 /***/ 91986:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -80238,14 +80712,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.TemurinDistribution = exports.TemurinImplementation = void 0;
+exports.TemurinDistribution = exports.TemurinImplementation = exports.ADOPTIUM_PUBLIC_KEY = void 0;
 const core = __importStar(__nccwpck_require__(37484));
 const tc = __importStar(__nccwpck_require__(33472));
 const fs_1 = __importDefault(__nccwpck_require__(79896));
 const path_1 = __importDefault(__nccwpck_require__(16928));
 const semver_1 = __importDefault(__nccwpck_require__(62088));
+const gpg = __importStar(__nccwpck_require__(88343));
+const adoptium_key_1 = __nccwpck_require__(80877);
 const base_installer_1 = __nccwpck_require__(79935);
 const util_1 = __nccwpck_require__(54527);
+var adoptium_key_2 = __nccwpck_require__(80877);
+Object.defineProperty(exports, "ADOPTIUM_PUBLIC_KEY", ({ enumerable: true, get: function () { return adoptium_key_2.ADOPTIUM_PUBLIC_KEY; } }));
 var TemurinImplementation;
 (function (TemurinImplementation) {
     TemurinImplementation["Hotspot"] = "Hotspot";
@@ -80270,7 +80748,8 @@ class TemurinDistribution extends base_installer_1.JavaBase {
                     : item.version_data.semver.replace('-beta+', '+');
                 return {
                     version: formattedVersion,
-                    url: item.binaries[0].package.link
+                    url: item.binaries[0].package.link,
+                    signatureUrl: item.binaries[0].package.signature_link
                 };
             });
             const satisfiedVersions = availableVersionsWithBinaries
@@ -80287,9 +80766,22 @@ class TemurinDistribution extends base_installer_1.JavaBase {
         });
     }
     downloadTool(javaRelease) {
+        var _a;
         return __awaiter(this, void 0, void 0, function* () {
             core.info(`Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`);
             let javaArchivePath = yield tc.downloadTool(javaRelease.url);
+            if (this.verifySignature) {
+                if (!javaRelease.signatureUrl) {
+                    throw new Error(`Input 'verify-signature' is enabled, but no signature URL was found for Temurin version ${javaRelease.version}.`);
+                }
+                core.info(`Verifying Java package signature...`);
+                try {
+                    yield gpg.verifyPackageSignature(javaArchivePath, javaRelease.signatureUrl, (_a = this.verifySignaturePublicKey) !== null && _a !== void 0 ? _a : adoptium_key_1.ADOPTIUM_PUBLIC_KEY);
+                }
+                catch (error) {
+                    throw new Error(`Failed to verify signature for Temurin version ${javaRelease.version} from ${javaRelease.signatureUrl}: ${error.message}`);
+                }
+            }
             core.info(`Extracting Java archive...`);
             const extension = (0, util_1.getDownloadArchiveExtension)();
             if (process.platform === 'win32') {
@@ -80305,6 +80797,9 @@ class TemurinDistribution extends base_installer_1.JavaBase {
     }
     get toolcacheFolderName() {
         return super.toolcacheFolderName;
+    }
+    supportsSignatureVerification() {
+        return true;
     }
     getAvailableVersions() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -80598,14 +81093,27 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.deleteKey = exports.importKey = exports.PRIVATE_KEY_FILE = void 0;
+exports.verifyPackageSignature = exports.deleteKey = exports.importKey = exports.toGpgPath = exports.PRIVATE_KEY_FILE = void 0;
 const fs = __importStar(__nccwpck_require__(79896));
 const path = __importStar(__nccwpck_require__(16928));
 const io = __importStar(__nccwpck_require__(94994));
 const exec = __importStar(__nccwpck_require__(95236));
+const tc = __importStar(__nccwpck_require__(33472));
 const util = __importStar(__nccwpck_require__(54527));
 exports.PRIVATE_KEY_FILE = path.join(util.getTempDir(), 'private-key.asc');
 const PRIVATE_KEY_FINGERPRINT_REGEX = /\w{40}/;
+// Convert a Windows path (D:\a\_temp\...) to a POSIX path (/d/a/_temp/...).
+// The Git-bundled GPG on Windows (MSYS2-based) uses POSIX path conventions
+// internally. Passing Windows paths with backslashes can cause fatal GPG errors
+// (exit code 2), so all paths passed to GPG must be in POSIX format on Windows.
+function toGpgPath(p) {
+    if (process.platform !== 'win32')
+        return p;
+    return p
+        .replace(/\\/g, '/')
+        .replace(/^([A-Za-z]):\//, (_, drive) => `/${drive.toLowerCase()}/`);
+}
+exports.toGpgPath = toGpgPath;
 function importKey(privateKey) {
     return __awaiter(this, void 0, void 0, function* () {
         fs.writeFileSync(exports.PRIVATE_KEY_FILE, privateKey, {
@@ -80642,6 +81150,49 @@ function deleteKey(keyFingerprint) {
     });
 }
 exports.deleteKey = deleteKey;
+function verifyPackageSignature(archivePath, signatureUrl, publicKeyContent) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const signaturePath = yield tc.downloadTool(signatureUrl);
+        let gpgHome;
+        try {
+            gpgHome = fs.mkdtempSync(path.join(util.getTempDir(), 'verify-signature-gpg-home-'));
+        }
+        catch (error) {
+            try {
+                yield io.rmRF(signaturePath);
+            }
+            catch (_a) {
+                // ignore cleanup failures
+            }
+            throw new Error(`Failed to create temporary GPG home directory for signature verification: ${error.message}`);
+        }
+        try {
+            const publicKeyFile = path.join(gpgHome, 'public-key.asc');
+            fs.writeFileSync(publicKeyFile, publicKeyContent, { encoding: 'utf-8' });
+            const options = { silent: true };
+            yield exec.exec('gpg', [
+                '--homedir',
+                toGpgPath(gpgHome),
+                '--batch',
+                '--import',
+                toGpgPath(publicKeyFile)
+            ], options);
+            yield exec.exec('gpg', [
+                '--homedir',
+                toGpgPath(gpgHome),
+                '--batch',
+                '--verify',
+                toGpgPath(signaturePath),
+                toGpgPath(archivePath)
+            ], options);
+        }
+        finally {
+            yield io.rmRF(signaturePath);
+            yield io.rmRF(gpgHome);
+        }
+    });
+}
+exports.verifyPackageSignature = verifyPackageSignature;
 
 
 /***/ }),
@@ -80710,6 +81261,8 @@ function run() {
             const cache = core.getInput(constants.INPUT_CACHE);
             const cacheDependencyPath = core.getInput(constants.INPUT_CACHE_DEPENDENCY_PATH);
             const checkLatest = (0, util_1.getBooleanInput)(constants.INPUT_CHECK_LATEST, false);
+            const verifySignature = (0, util_1.getBooleanInput)(constants.INPUT_VERIFY_SIGNATURE, false);
+            const verifySignaturePublicKey = core.getInput(constants.INPUT_VERIFY_SIGNATURE_PUBLIC_KEY) || undefined;
             let toolchainIds = core.getMultilineInput(constants.INPUT_MVN_TOOLCHAIN_ID);
             core.startGroup('Installed distributions');
             if (versions.length !== toolchainIds.length) {
@@ -80722,6 +81275,8 @@ function run() {
                 architecture,
                 packageType,
                 checkLatest,
+                verifySignature,
+                verifySignaturePublicKey,
                 distributionName,
                 jdkFile,
                 toolchainIds
@@ -80755,11 +81310,13 @@ function run() {
 run();
 function installVersion(version, options, toolchainId = 0) {
     return __awaiter(this, void 0, void 0, function* () {
-        const { distributionName, jdkFile, architecture, packageType, checkLatest, toolchainIds } = options;
+        const { distributionName, jdkFile, architecture, packageType, checkLatest, verifySignature, verifySignaturePublicKey, toolchainIds } = options;
         const installerOptions = {
             architecture,
             packageType,
             checkLatest,
+            verifySignature,
+            verifySignaturePublicKey,
             version
         };
         const distribution = (0, distribution_factory_1.getJavaDistribution)(distributionName, installerOptions, jdkFile);
@@ -81039,6 +81596,13 @@ function getDownloadArchiveExtension() {
 exports.getDownloadArchiveExtension = getDownloadArchiveExtension;
 function isVersionSatisfies(range, version) {
     var _a;
+    // Some distributions (e.g. JetBrains Runtime) publish 4-segment versions
+    // like '17.0.8.1+1080.1' that semver rejects. If the candidate version
+    // isn't valid semver, it can't match — bail out rather than letting
+    // compareBuild / satisfies throw.
+    if (!semver.valid(version)) {
+        return false;
+    }
     if (semver.valid(range)) {
         // if full version with build digit is provided as a range (such as '1.2.3+4')
         // we should check for exact equal via compareBuild
@@ -128092,7 +128656,7 @@ Object.defineProperty(exports, "YAMLWriter", ({ enumerable: true, get: function 
 /***/ ((module) => {
 
 "use strict";
-module.exports = /*#__PURE__*/JSON.parse('{"name":"@actions/cache","version":"5.0.5","preview":true,"description":"Actions cache lib","keywords":["github","actions","cache"],"homepage":"https://github.com/actions/toolkit/tree/main/packages/cache","license":"MIT","main":"lib/cache.js","types":"lib/cache.d.ts","directories":{"lib":"lib","test":"__tests__"},"files":["lib","!.DS_Store"],"publishConfig":{"access":"public"},"repository":{"type":"git","url":"git+https://github.com/actions/toolkit.git","directory":"packages/cache"},"scripts":{"audit-moderate":"npm install && npm audit --json --audit-level=moderate > audit.json","test":"echo \\"Error: run tests from root\\" && exit 1","tsc":"tsc"},"bugs":{"url":"https://github.com/actions/toolkit/issues"},"dependencies":{"@actions/core":"^2.0.0","@actions/exec":"^2.0.0","@actions/glob":"^0.5.1","@protobuf-ts/runtime-rpc":"^2.11.1","@actions/http-client":"^3.0.2","@actions/io":"^2.0.0","@azure/abort-controller":"^1.1.0","@azure/core-rest-pipeline":"^1.22.0","@azure/storage-blob":"^12.29.1","semver":"^6.3.1"},"devDependencies":{"@types/node":"^24.1.0","@types/semver":"^6.0.0","@protobuf-ts/plugin":"^2.9.4","typescript":"^5.2.2"},"overrides":{"uri-js":"npm:uri-js-replace@^1.0.1","node-fetch":"^3.3.2"}}');
+module.exports = /*#__PURE__*/JSON.parse('{"name":"@actions/cache","version":"5.1.0","preview":true,"description":"Actions cache lib","keywords":["github","actions","cache"],"homepage":"https://github.com/actions/toolkit/tree/main/packages/cache","license":"MIT","main":"lib/cache.js","types":"lib/cache.d.ts","directories":{"lib":"lib","test":"__tests__"},"files":["lib","!.DS_Store"],"publishConfig":{"access":"public"},"repository":{"type":"git","url":"git+https://github.com/actions/toolkit.git","directory":"packages/cache"},"scripts":{"audit-moderate":"npm install && npm audit --json --audit-level=moderate > audit.json","test":"echo \\"Error: run tests from root\\" && exit 1","tsc":"tsc"},"bugs":{"url":"https://github.com/actions/toolkit/issues"},"dependencies":{"@actions/core":"^2.0.0","@actions/exec":"^2.0.0","@actions/glob":"^0.5.1","@protobuf-ts/runtime-rpc":"^2.11.1","@actions/http-client":"^3.0.2","@actions/io":"^2.0.0","@azure/abort-controller":"^1.1.0","@azure/core-rest-pipeline":"^1.22.0","@azure/storage-blob":"^12.29.1","semver":"^6.3.1"},"devDependencies":{"@types/node":"^24.1.0","@types/semver":"^6.0.0","@protobuf-ts/plugin":"^2.9.4","typescript":"^5.2.2"},"overrides":{"uri-js":"npm:uri-js-replace@^1.0.1","node-fetch":"^3.3.2"}}');
 
 /***/ })
 
