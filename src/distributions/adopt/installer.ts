@@ -102,7 +102,8 @@ export class AdoptDistribution extends JavaBase {
       .map(item => {
         return {
           version: item.version_data.semver,
-          url: item.binaries[0].package.link
+          url: item.binaries[0].package.link,
+          checksum: item.binaries[0].package.checksum
         } as JavaDownloadRelease;
       });
 
@@ -131,6 +132,7 @@ export class AdoptDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();

@@ -31,6 +31,7 @@ export class CorrettoDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();
@@ -68,7 +69,8 @@ export class CorrettoDistribution extends JavaBase {
       .map(item => {
         return {
           version: convertVersionToSemver(item.correttoVersion),
-          url: item.downloadLink
+          url: item.downloadLink,
+          checksum: item.checksum_sha256
         } as JavaDownloadRelease;
       });
 

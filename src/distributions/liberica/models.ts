@@ -17,6 +17,7 @@ export interface ArchitectureOptions {
 
 export interface LibericaVersion {
   downloadUrl: string;
+  sha256?: string;
   version: string;
   featureVersion: number;
   interimVersion: number;

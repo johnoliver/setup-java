@@ -55,7 +55,8 @@ export class TemurinDistribution extends JavaBase {
         return {
           version: formattedVersion,
           url: item.binaries[0].package.link,
-          signatureUrl: item.binaries[0].package.signature_link
+          signatureUrl: item.binaries[0].package.signature_link,
+          checksum: item.binaries[0].package.checksum
         } as JavaDownloadRelease;
       });
 
@@ -84,6 +85,7 @@ export class TemurinDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     if (this.verifySignature) {
       if (!javaRelease.signatureUrl) {

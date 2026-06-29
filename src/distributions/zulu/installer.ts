@@ -33,6 +33,7 @@ export class ZuluDistribution extends JavaBase {
       return {
         version: convertVersionToSemver(item.jdk_version),
         url: item.url,
+        checksum: item.sha256_hash,
         zuluVersion: convertVersionToSemver(item.zulu_version)
       };
     });
@@ -50,7 +51,8 @@ export class ZuluDistribution extends JavaBase {
       .map(item => {
         return {
           version: item.version,
-          url: item.url
+          url: item.url,
+          checksum: item.checksum
         } as JavaDownloadRelease;
       });
 
@@ -73,6 +75,7 @@ export class ZuluDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();

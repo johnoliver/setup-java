@@ -33,6 +33,7 @@ export class LibericaDistributions extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();
@@ -61,7 +62,8 @@ export class LibericaDistributions extends JavaBase {
 
     const availableVersions = availableVersionsRaw.map(item => ({
       url: item.downloadUrl,
-      version: this.convertVersionToSemver(item)
+      version: this.convertVersionToSemver(item),
+      checksum: item.sha256
     }));
 
     const satisfiedVersion = availableVersions
@@ -108,7 +110,7 @@ export class LibericaDistributions extends JavaBase {
       'build-type': this.stable ? 'all' : 'ea',
       'installation-type': 'archive',
       fields:
-        'downloadUrl,version,featureVersion,interimVersion,updateVersion,buildVersion'
+        'downloadUrl,sha256,version,featureVersion,interimVersion,updateVersion,buildVersion'
     };
 
     const searchParams = new URLSearchParams(urlOptions).toString();

@@ -89,7 +89,7 @@ describe('getAvailableVersions', () => {
     ]
   ])('build correct url for %s -> %s', async (input, urlParams) => {
     const additionalParams =
-      '&installation-type=archive&fields=downloadUrl%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
+      '&installation-type=archive&fields=downloadUrl%2Csha256%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
       'updateVersion%2CbuildVersion';
     const distribution = new LibericaDistributions(input);
     distribution['getPlatformOption'] = () => 'macos';
@@ -123,7 +123,7 @@ describe('getAvailableVersions', () => {
       });
 
       const additionalParams =
-        '&installation-type=archive&fields=downloadUrl%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
+        '&installation-type=archive&fields=downloadUrl%2Csha256%2Cversion%2CfeatureVersion%2CinterimVersion%2C' +
         'updateVersion%2CbuildVersion';
       distributions['getPlatformOption'] = () => 'macos';
 
@@ -211,6 +211,20 @@ describe('findPackageForDownload', () => {
   ])('version is %s -> %s', async (input, expected) => {
     const result = await distribution['findPackageForDownload'](input);
     expect(result.version).toBe(expected);
+  });
+
+  it('includes checksum when the Liberica API returns one', async () => {
+    distribution['getAvailableVersions'] = async () =>
+      [
+        {
+          ...manifestData[0],
+          sha256: 'def456'
+        }
+      ] as LibericaVersion[];
+
+    const result = await distribution['findPackageForDownload']('14');
+
+    expect(result.checksum).toBe('def456');
   });
 
   it('should throw an error', async () => {

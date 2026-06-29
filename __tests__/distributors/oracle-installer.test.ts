@@ -1,3 +1,5 @@
+import * as tc from '@actions/tool-cache';
+import fs from 'fs';
 import {OracleDistribution} from '../../src/distributions/oracle/installer';
 import os from 'os';
 import * as core from '@actions/core';
@@ -9,6 +11,7 @@ describe('findPackageForDownload', () => {
   let spyDebug: jest.SpyInstance;
   let spyHttpClient: jest.SpyInstance;
   let spyCoreError: jest.SpyInstance;
+  let spyDownloadTool: jest.SpyInstance;
 
   beforeEach(() => {
     distribution = new OracleDistribution({
@@ -24,6 +27,11 @@ describe('findPackageForDownload', () => {
     // Mock core.error to suppress error logs
     spyCoreError = jest.spyOn(core, 'error');
     spyCoreError.mockImplementation(() => {});
+    spyDownloadTool = jest.spyOn(tc, 'downloadTool');
+    spyDownloadTool.mockResolvedValue('/tmp/oracle.sha256');
+    jest.spyOn(fs, 'readFileSync').mockReturnValue(
+      'abc123def456  jdk-21_linux-x64_bin.tar.gz'
+    );
   });
 
   it.each([
@@ -92,6 +100,7 @@ describe('findPackageForDownload', () => {
       .replace('{{OS_TYPE}}', osType)
       .replace('{{ARCHIVE_TYPE}}', archiveType);
     expect(result.url).toBe(url);
+    expect(result.checksum).toBe('abc123def456');
   });
 
   it.each([
@@ -133,5 +142,21 @@ describe('findPackageForDownload', () => {
     await expect(distribution['findPackageForDownload']('11')).rejects.toThrow(
       /Oracle JDK is only supported for JDK 17 and later/
     );
+  });
+
+  it('falls back gracefully when the Oracle checksum sidecar cannot be downloaded', async () => {
+    spyHttpClient = jest.spyOn(HttpClient.prototype, 'head');
+    spyHttpClient.mockReturnValue(
+      Promise.resolve({
+        message: {
+          statusCode: 200
+        }
+      })
+    );
+    spyDownloadTool.mockRejectedValue(new Error('not found'));
+
+    const result = await distribution['findPackageForDownload']('21');
+
+    expect(result.checksum).toBeUndefined();
   });
 });

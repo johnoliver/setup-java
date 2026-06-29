@@ -69,7 +69,8 @@ export class SemeruDistribution extends JavaBase {
           : item.version_data.semver.replace('-beta+', '+');
         return {
           version: formattedVersion,
-          url: item.binaries[0].package.link
+          url: item.binaries[0].package.link,
+          checksum: item.binaries[0].package.checksum
         } as JavaDownloadRelease;
       });
 
@@ -105,6 +106,7 @@ export class SemeruDistribution extends JavaBase {
       `Downloading Java ${javaRelease.version} (${this.distribution}) from ${javaRelease.url} ...`
     );
     let javaArchivePath = await tc.downloadTool(javaRelease.url);
+    await this.verifyDownloadedArchiveChecksum(javaArchivePath, javaRelease);
 
     core.info(`Extracting Java archive...`);
     const extension = getDownloadArchiveExtension();

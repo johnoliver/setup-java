@@ -16,4 +16,5 @@ export interface JavaDownloadRelease {
   version: string;
   url: string;
   signatureUrl?: string;
+  checksum?: string;
 }

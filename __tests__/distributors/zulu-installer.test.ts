@@ -221,6 +221,26 @@ describe('findPackageForDownload', () => {
     );
   });
 
+  it('includes checksum when the Zulu API returns one', async () => {
+    const distribution = new ZuluDistribution({
+      version: '11',
+      architecture: 'x86',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    distribution['getAvailableVersions'] = async () =>
+      [
+        {
+          ...manifestData[0],
+          sha256_hash: 'abc123'
+        }
+      ] as IZuluVersions[];
+
+    const result = await distribution['findPackageForDownload']('8');
+
+    expect(result.checksum).toBe('abc123');
+  });
+
   it('should throw an error', async () => {
     const distribution = new ZuluDistribution({
       version: '18',

@@ -705,3 +705,66 @@ describe('getToolcacheVersionName', () => {
     expect(actual).toBe(expected);
   });
 });
+
+describe('verifyDownloadedArchiveChecksum', () => {
+  let mockJavaBase: EmptyJavaBase;
+  let spyVerifyFileChecksum: jest.SpyInstance;
+  let spyCoreWarning: jest.SpyInstance;
+
+  beforeEach(() => {
+    mockJavaBase = new EmptyJavaBase({
+      version: '17',
+      architecture: 'x64',
+      packageType: 'jdk',
+      checkLatest: false
+    });
+    spyVerifyFileChecksum = jest.spyOn(util, 'verifyFileChecksum');
+    spyVerifyFileChecksum.mockResolvedValue(undefined);
+    spyCoreWarning = jest.spyOn(core, 'warning');
+    spyCoreWarning.mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  it('verifies the downloaded archive when a checksum is present', async () => {
+    await mockJavaBase['verifyDownloadedArchiveChecksum']('/tmp/jdk.tar.gz', {
+      version: '17.0.14+7',
+      url: 'https://example.com/jdk.tar.gz',
+      checksum: 'abc123'
+    });
+
+    expect(spyVerifyFileChecksum).toHaveBeenCalledWith(
+      '/tmp/jdk.tar.gz',
+      'abc123'
+    );
+  });
+
+  it('warns when no checksum is available', async () => {
+    await mockJavaBase['verifyDownloadedArchiveChecksum']('/tmp/jdk.tar.gz', {
+      version: '17.0.14+7',
+      url: 'https://example.com/jdk.tar.gz'
+    });
+
+    expect(spyCoreWarning).toHaveBeenCalledWith(
+      'No checksum available for this Empty release; skipping integrity check.'
+    );
+  });
+
+  it('wraps checksum failures with distribution context', async () => {
+    spyVerifyFileChecksum.mockRejectedValue(new Error('bad checksum'));
+
+    await expect(
+      mockJavaBase['verifyDownloadedArchiveChecksum']('/tmp/jdk.tar.gz', {
+        version: '17.0.14+7',
+        url: 'https://example.com/jdk.tar.gz',
+        checksum: 'abc123'
+      })
+    ).rejects.toThrow(
+      'Failed to verify checksum for Empty version 17.0.14+7: bad checksum'
+    );
+  });
+});

@@ -292,6 +292,7 @@ describe('downloadTool', () => {
   let spyDownloadTool: jest.SpyInstance;
   let spyVerifySignature: jest.SpyInstance;
   let spyExtractJdkFile: jest.SpyInstance;
+  let spyVerifyChecksum: jest.SpyInstance;
   let spyCacheDir: jest.SpyInstance;
   let spyReadDirSync: jest.SpyInstance;
   let spyRenameWinArchive: jest.SpyInstance;
@@ -303,6 +304,8 @@ describe('downloadTool', () => {
     spyVerifySignature.mockResolvedValue(undefined);
     spyExtractJdkFile = jest.spyOn(util, 'extractJdkFile');
     spyExtractJdkFile.mockResolvedValue('/tmp/extracted');
+    spyVerifyChecksum = jest.spyOn(util, 'verifyFileChecksum');
+    spyVerifyChecksum.mockResolvedValue(undefined);
     spyCacheDir = jest.spyOn(tc, 'cacheDir');
     spyCacheDir.mockResolvedValue('/tmp/toolcache');
     spyReadDirSync = jest.spyOn(fs, 'readdirSync');
@@ -315,6 +318,74 @@ describe('downloadTool', () => {
     jest.resetAllMocks();
     jest.clearAllMocks();
     jest.restoreAllMocks();
+  });
+
+  it('verifies checksum after download', async () => {
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await distribution['downloadTool']({
+      version: '17.0.14+7',
+      url: 'https://example.com/jdk.tar.gz',
+      checksum: 'abc123def456'
+    });
+
+    expect(spyVerifyChecksum).toHaveBeenCalledWith(
+      '/tmp/jdk.tar.gz',
+      'abc123def456'
+    );
+  });
+
+  it('logs warning when no checksum available', async () => {
+    const spyCoreWarning = jest
+      .spyOn(core, 'warning')
+      .mockImplementation(() => {});
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await distribution['downloadTool']({
+      version: '17.0.14+7',
+      url: 'https://example.com/jdk.tar.gz'
+    });
+
+    expect(spyCoreWarning).toHaveBeenCalledWith(
+      'No checksum available for this Temurin-Hotspot release; skipping integrity check.'
+    );
+  });
+
+  it('throws when checksum verification fails', async () => {
+    spyVerifyChecksum.mockRejectedValue(new Error('bad checksum'));
+    const distribution = new TemurinDistribution(
+      {
+        version: '17',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      },
+      TemurinImplementation.Hotspot
+    );
+
+    await expect(
+      distribution['downloadTool']({
+        version: '17.0.14+7',
+        url: 'https://example.com/jdk.tar.gz',
+        checksum: 'abc123def456'
+      })
+    ).rejects.toThrow('Failed to verify checksum');
   });
 
   it('verifies signature when enabled', async () => {

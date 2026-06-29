@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import * as semver from 'semver';
 import * as cache from '@actions/cache';
 import * as core from '@actions/core';
@@ -267,4 +268,28 @@ export function renameWinArchive(javaArchivePath: string): string {
   const javaArchivePathRenamed = `${javaArchivePath}.zip`;
   fs.renameSync(javaArchivePath, javaArchivePathRenamed);
   return javaArchivePathRenamed;
+}
+
+export async function verifyFileChecksum(
+  filePath: string,
+  expectedChecksum: string
+): Promise<void> {
+  const actualChecksum = await new Promise<string>((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex').toLowerCase()));
+    stream.on('error', error => {
+      stream.destroy();
+      reject(error);
+    });
+  });
+  const normalizedExpectedChecksum = expectedChecksum.toLowerCase();
+
+  if (actualChecksum !== normalizedExpectedChecksum) {
+    throw new Error(
+      `Checksum mismatch for downloaded Java archive: expected '${normalizedExpectedChecksum}' but got '${actualChecksum}'`
+    );
+  }
 }

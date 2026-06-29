@@ -321,6 +321,26 @@ describe('findPackageForDownload', () => {
     expect(resolvedVersion.version).toBe(expected);
   });
 
+  it('includes checksum from the legacy Adopt API response', async () => {
+    const distribution = new AdoptDistribution(
+      {
+        version: '11',
+        architecture: 'x64',
+        packageType: 'jdk',
+        checkLatest: false
+      },
+      AdoptImplementation.Hotspot
+    );
+    distribution['temurinDistribution']!['findPackageForDownload'] = async () => {
+      throw new Error('No matching version found for SemVer');
+    };
+    distribution['getAvailableVersions'] = async () => manifestData as any;
+
+    const resolvedVersion = await distribution['findPackageForDownload']('11');
+
+    expect(resolvedVersion.checksum).toBeTruthy();
+  });
+
   it('version is found but binaries list is empty', async () => {
     const distribution = new AdoptDistribution(
       {
